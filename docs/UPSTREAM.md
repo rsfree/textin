@@ -131,6 +131,25 @@ cookie/umid）——这决定绕过手段是"换 IP"还是"换身份"。两轴�
   （用 `scripts/probe.py --phases pool` 验：出口数、轮换粒度、是否共享已耗节点）。
 
 实测（2026-09-24）：池 3 轮得 3 个不同出口；经服务客户端真实调用 `200`（3.43s）。
+📌 补记（同日）：**池的节点也可能已被别人用枯** —— 实测某节点直接回 `451`，换一个即 `200`
+⇒ 用池时把「`451` → 换节点重试」当常规（本服务当前**不自动重试**，由调用方决定；
+要内置可选的「451→换节点→重试」环请提需求）。
+
+### 4.2 身份线：textin **没有**可铸造的匿名指纹身份（2026-09-24 实测，负结果）
+
+参考 metaso 的做法（`metaso/tools/mint_identity.py`：Playwright 起无痕 Chromium、
+让指纹 JS 回种 cookie，收全量后注入 `METASO_COOKIE`），对 textin 做了同样的铸造与注入：
+
+| 步骤 | 结果 |
+|---|---|
+| 纯 HTTP 探测（curl，零额度） | `api.textin.com` **不发任何 cookie**；`tools./web-api.textin.com` 只发 WAF 的 `acw_tc`（HttpOnly，30min TTL） |
+| Playwright 铸造（本仓 `scripts/mint_identity.py`） | 只有 `acw_tc` + 分析类（百度 `Hm_*`/`HMACCOUNT`、诸葛 `zg_did`）；**没有** metaso 那套阿里指纹（`_c_WBKFRo`/`_nb_ioWEgULi`/`aliyungf_tc`/`tid`）；匿名访客**没有** `_textin_token` |
+| 注入实测（直连出口处于 `431` 时，逐变体） | ① 裸发 = `431`；② +铸造 cookie = **`431`**；③ +cookie+完整浏览器头（`sec-ch-ua`/`sec-fetch-*`/Accept-Language）= **`431`** |
+
+⇒ **textin 的身份维度不可利用**（与 metaso 正相反）：站点不给匿名访客发指纹身份，
+且这些字段被上游忽略（配额键只看**连接侧 IP**）。
+**本服务刻意不提供 `TEXTIN_COOKIE` 之类的注入旋钮** —— 没有可用素材的配置就是假配置
+（项目纪律）；`scripts/mint_identity.py` 保留，用于日后复验"站点是否改发指纹身份"。
 
 ---
 

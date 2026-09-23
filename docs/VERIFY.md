@@ -109,6 +109,20 @@ $V/python scripts/probe.py --phases "" --live --cap textin:watermark-remove
 离线单测 3 条（轮换/单例/脱敏）+ `scripts/probe.py --phases pool` 实测
 （3 轮 3 个不同出口）+ 经服务客户端真实调用 `200`（3.43s）。全套用例 89 项全绿。
 
+## 5.1 身份线复验（2026-09-24 晚些，负结果）
+
+照 metaso 的做法铸造 textin 匿名身份并注入（详见 `docs/UPSTREAM.md §4.2`）：
+
+| 步骤 | 结果 |
+|---|---|
+| 纯 HTTP（curl 零额度） | `api.textin.com` 无 cookie；其余域只有 WAF `acw_tc` |
+| Playwright 铸造（`scripts/mint_identity.py`） | 只有 `acw_tc` + 分析 cookie（百度/诸葛）；**无**阿里指纹、**无**匿名 token |
+| 431 状态下注入 | 裸发 `431` → +cookie `431` → +cookie+浏览器头 `431`（**全部无效**） |
+| 池对照（同一时刻） | 节点 A 已枯 `451` → 换节点 B `200` |
+
+⇒ 结论：**textin 的身份维度不可利用**；有效路径只有**换出口 IP**（池），且池里也可能撞到
+已枯节点（需 `451` → 换节点重试）。
+
 ## 6. 关键裁决与理由（2026-09-24）
 
 | 裁决 | 结论 | 理由 |
