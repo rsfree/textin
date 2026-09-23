@@ -102,6 +102,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             logger.info("未配 TEXTIN_TOKEN：按**匿名**调用上游（配额按 IP 计，见 docs/UPSTREAM.md §4）")
         if s.ROTATE_XFF:
             logger.warning("TEXTIN_ROTATE_XFF=1：已开启 XFF 轮换（属对抗性规避，默认应为 0）")
+        if s.PROXY_POOL.strip():
+            logger.warning(
+                "TEXTIN_PROXY_POOL 已配置（{} 个入口）：每个请求会换一个新出口。"
+                "绕试用配额属对抗性规避，默认应为空 —— 由部署方确认这是有意为之",
+                app.state.client.pool_size,
+            )
         if s.ALLOW_UNVERIFIED:
             logger.warning("TEXTIN_ALLOW_UNVERIFIED=1：未取证能力已放开（后果由部署方承担）")
         try:
@@ -167,6 +173,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "upstream_base": f"{s.BASE_URL}{s.OCR_PATH}",
             "upstream_auth": "token" if s.TOKEN else "anonymous",
             "xff_rotation": bool(s.ROTATE_XFF),
+            # 出口形态要可见（凭据已脱敏）：池配了没有、几个入口、都是谁
+            "egress_proxies": _client(request).masked_proxies(),
             "allow_unverified": allow,
             "media_dir": s.MEDIA_DIR,
             "quota_window": gate.snapshot(),

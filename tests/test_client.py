@@ -227,3 +227,80 @@ def test_fetch_url_http_error():
     with pytest.raises(UpstreamUnavailableError):
         arun(client.fetch_url("https://example.invalid/miss.png", 1 << 20))
     arun(client.aclose())
+
+
+# --------------------------------------------------------------------- 代理池
+
+
+def test_proxy_pool_rotates_a_fresh_client_per_request(monkeypatch):
+    """配了池 ⇒ **每个请求新建 client 并轮换代理**（复用连接会拿回同一出口）。
+
+    离线做法：替换 `httpx.AsyncClient` 构造器 —— 记录 kwarg（证明"代理真的传下去了"），
+    同时仍用 MockTransport 承接请求（一个字节都不出网）。
+    🔴 回归点：有代理时**不得**再传 `transport`（httpx 会让 proxy 胜出、把假传输绕开，
+    2026-09-24 实测），所以断言 kwargs 里只有 proxy。
+    """
+    real_cls = httpx.AsyncClient  # 先抓住真类：monkeypatch 是**全局**替换，不抓会自递归
+    seen: list[dict] = []
+
+    def fake_ctor(**kwargs):
+        seen.append(dict(kwargs))
+        clean = {k: v for k, v in kwargs.items() if k not in ("proxy", "transport")}
+        return real_cls(transport=httpx.MockTransport(_ok_image_handler), **clean)
+
+    monkeypatch.setattr("app.upstream.textin.client.httpx.AsyncClient", fake_ctor)
+    conf = settings(PROXY_POOL="http://p-one:1,http://p-two:2")
+    client = TextinClient(conf)
+    cap = lookup("textin:watermark-remove")
+    for _ in range(3):
+        arun(client.call(cap, PNG_SMALL, "image/png"))
+    arun(client.aclose())
+
+    assert len(seen) == 4, "1 个长命 client + 3 个按请求新建的 client"
+    assert "proxy" not in seen[0], "无池语义下不传代理"
+    assert [c.get("proxy") for c in seen[1:]] == ["http://p-one:1", "http://p-two:2",
+                                                  "http://p-one:1"], "轮询顺序"
+    assert all("transport" not in c for c in seen[1:]), "有代理时不能再传 transport"
+    # 凭据脱敏视图
+    masked = TextinClient(settings(PROXY_POOL="http://user:pass@p1.cn:2086,socks5://p2.cn:1080"))
+    assert masked.masked_proxies() == ["http://p1.cn:2086", "socks5://p2.cn:1080"]
+    assert masked.pool_size == 2
+    arun(masked.aclose())
+
+
+def test_no_pool_keeps_single_long_lived_client(monkeypatch):
+    real_cls = httpx.AsyncClient
+    seen: list[dict] = []
+
+    def fake_ctor(**kwargs):
+        seen.append(dict(kwargs))
+        return real_cls(**kwargs)
+
+    monkeypatch.setattr("app.upstream.textin.client.httpx.AsyncClient", fake_ctor)
+    conf = settings(PROXY_POOL="")
+    client = TextinClient(conf, transport=httpx.MockTransport(_ok_image_handler))
+    for _ in range(3):
+        arun(client.call(lookup("textin:demoire"), PNG_SMALL, "image/png"))
+    arun(client.aclose())
+
+    assert len(seen) == 1, "无池：全程一个 client"
+    assert seen[0].get("proxy") is None and "transport" in seen[0]
+
+
+def test_dry_run_reports_whether_proxy_is_in_use():
+    _, client_no_pool = _client(_ok_image_handler)
+    preview = arun(client_no_pool.call(lookup("textin:watermark-remove"), PNG_SMALL,
+                                       "image/png", dry_run=True))
+    arun(client_no_pool.aclose())
+    assert preview["via_proxy"] is False
+
+    conf = settings(PROXY_POOL="http://p-one:1")
+    client_pool = TextinClient(conf, transport=httpx.MockTransport(_ok_image_handler))
+    preview2 = arun(client_pool.call(lookup("textin:watermark-remove"), PNG_SMALL,
+                                     "image/png", dry_run=True))
+    arun(client_pool.aclose())
+    assert preview2["via_proxy"] is True
+
+
+def _ok_image_handler(req: httpx.Request) -> httpx.Response:
+    return json_response(envelope({"image": b64(JPEG_SMALL)}))

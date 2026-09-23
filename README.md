@@ -69,8 +69,11 @@ curl -s localhost:8600/v1/images/generations \
 ```bash
 python scripts/probe.py                 # ① 21 条能力的出站形状 + 假上游全链路回路
 zsh scripts/smoke.sh 8699               # ② 真起服务 + 真 HTTP + 假上游（14 项断言）
-python -m pytest -q                     # ③ 86 项用例（socket 级门禁保证零出网）
+python -m pytest -q                     # ③ 89 项用例（socket 级门禁保证零出网）
 python -m ruff check .
+
+# ④ 验池（配了 TEXTIN_PROXY_POOL 时）：出口 IP / 轮换粒度；加 --live 再真实调一次
+python scripts/probe.py --phases pool [--live]
 ```
 
 要**真实**打一次上游（消耗该 service 的匿名试用额度，零费用）：
@@ -100,7 +103,7 @@ python scripts/probe.py --phases "" --live --cap textin:watermark-remove
 |---|---|
 | `textin:ofd-to-image` | 站点上存在但**零样本、从未端到端跑过** ⇒ 默认 503 门禁；`TEXTIN_ALLOW_UNVERIFIED=1` 放开 |
 | `dewarp` / `image_quality_inspect` | **不注册**（前者是重定向页且需未知参数；后者付费档配额 + 形态未取证）—— 理由在 `/capabilities` 的 `not_registered` |
-| `X-Forwarded-For` 轮换 | **默认关**：那是绕按 IP 试用配额，属对抗性规避。开关只为可复现性存在 |
+| `X-Forwarded-For` 轮换 / 代理池换出口 | **默认都关**（`TEXTIN_ROTATE_XFF=0` / `TEXTIN_PROXY_POOL` 空）：绕按 IP 试用配额属对抗性规避，开与不开由部署方决定。依据是 2026-09-24 的维度归因实验（`docs/UPSTREAM.md §4.1`：**按出口 IP 的软限，身份/指纹不是维度**） |
 | 异步两段式 / 任务表 / 回调 | 上游没有任务概念，本服务**不发明**（见页首裁决） |
 | 批量处理 | 站点页面上有"在线批量处理"入口，但上游批量接口未取证 |
 
@@ -138,5 +141,7 @@ tests/                 86 项，全离线（socket 级门禁）
 - **单 worker 默认**（`TEXTIN_WORKERS=1`）：431 静默窗与 span 记账在**进程内**，
   多 worker 会让它们变 N 份。要提吞吐先确认这些状态是否要迁移（README §5 的说明见 `gunicorn_conf.py`）。
 - 上游是公网 HTTP，**不吃宿主代理**（`trust_env=False`）——部署机有透明代理时行为一致。
+  **换出口只有两条显式通道**：`TEXTIN_ROTATE_XFF` 与 `TEXTIN_PROXY_POOL`（见上表 + `docs/UPSTREAM.md §4`）。
 - `var/media` 要可写（`response_format=url` 用）；容器里已建好并 chown 给运行用户。
-- 健康检查：`/healthz`（零依赖）；`/readyz` 会报配额静默窗状态（窗内 `degraded`）。
+- 健康检查：`/healthz`（零依赖）；`/readyz` 会报配额静默窗状态与**脱敏后的出口池**
+  （窗内 `degraded`）。

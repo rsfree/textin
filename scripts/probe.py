@@ -238,11 +238,72 @@ def phase_live(cap_name: str, input_path: str | None) -> int:
     return 0
 
 
+def phase_pool(live: bool) -> int:
+    """验池：`TEXTIN_PROXY_POOL` 里每个入口的**真实出口 IP**（每次新连接）。
+
+    这是 wenxin 那轮换来的教训：池的"标称"不等于实际 —— 必须实测出口数与轮换粒度
+    （那次号称的池其实只有 3 个出口，且复用连接会钉住同一个出口）。
+    加 `--live` 时再经**服务自己的客户端**（`TextinClient`）真实调一次上游，
+    证明池路径端到端可用（消耗 1 次试用额度）。
+    """
+    print("=" * 104)
+    print("【pool】代理池实测（出口 IP / 轮换粒度）")
+    conf = Settings(_env_file=None)
+    pool = [p.strip() for p in conf.PROXY_POOL.split(",") if p.strip()]
+    if not pool:
+        print("TEXTIN_PROXY_POOL 未配置 —— 跳过（这是默认状态：直连）")
+        return 0
+    print(f"池入口 {len(pool)} 个：{[_mask(p) for p in pool]}")
+
+    ips: list[str] = []
+    rounds = max(3, len(pool) * 2)
+    for i in range(rounds):
+        proxy = pool[i % len(pool)]
+        try:
+            with httpx.Client(proxy=proxy, timeout=20, trust_env=False) as c:
+                ip = c.get("https://ifconfig.me/ip").text.strip()[:40]
+        except Exception as exc:  # noqa: BLE001
+            ip = f"<FAIL {type(exc).__name__}>"
+        ips.append(ip)
+        print(f"  轮 {i + 1}: {_mask(proxy)} → {ip}")
+    good = [ip for ip in ips if not ip.startswith("<")]
+    print(f"出口 IP：{len(set(good))} 个不同的 / {len(good)} 次成功 / 共 {rounds} 轮")
+
+    if live:
+        print("\n--live：经服务客户端真实调一次 watermark-remove --")
+        from app.models import lookup  # noqa: PLC0415
+
+        client = TextinClient(conf)
+        data, mime = sample_for(lookup("textin:watermark-remove"))
+
+        async def _one():
+            t0 = time.time()
+            try:
+                env = await client.call(lookup("textin:watermark-remove"), data, mime)
+                return {"seconds": round(time.time() - t0, 2), "code": env.get("code"),
+                        "request_id": env.get("x_request_id")}
+            finally:
+                await client.aclose()
+
+        print(json.dumps(asyncio.run(_one()), ensure_ascii=False))
+        print("⚠️ 已消耗该 service 的试用额度 1 次")
+    return 0
+
+
+def _mask(proxy: str) -> str:
+    try:
+        u = httpx.URL(proxy)
+        return f"{u.scheme}://{u.host}:{u.port}"
+    except Exception:  # noqa: BLE001
+        return "<unparsable>"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="textin-service 自检")
     ap.add_argument("--phases", default="shapes,loop",
-                    help="逗号分隔：shapes / loop（默认两个都跑，零真实请求）")
-    ap.add_argument("--live", action="store_true", help="真实调用上游（消耗试用额度）")
+                    help="逗号分隔：shapes / loop / pool（默认前两个，零真实请求）")
+    ap.add_argument("--live", action="store_true",
+                    help="pool 阶段真实调一次；--cap 单独用时也走真实调用（消耗试用额度）")
     ap.add_argument("--cap", default="textin:watermark-remove", help="--live 时调哪条能力")
     ap.add_argument("--input", default=None, help="--live 时的输入文件（默认用内置样本）")
     args = ap.parse_args()
@@ -253,7 +314,9 @@ def main() -> int:
         bad += phase_shapes()
     if "loop" in phases:
         bad += phase_loop()
-    if args.live:
+    if "pool" in phases:
+        bad += phase_pool(args.live)
+    if args.live and "pool" not in phases:
         bad += phase_live(args.cap, args.input)
     return 0 if bad == 0 else 1
 

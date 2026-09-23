@@ -65,6 +65,7 @@ def test_readyz_reports_anonymous_and_capability_counts(tmp_path):
     checks = body["checks"]
     assert checks["upstream_auth"] == "anonymous"
     assert checks["xff_rotation"] is False
+    assert checks["egress_proxies"] == []          # 默认直连（池为空）
     assert checks["capabilities"] == {"total": 21, "available": 20}
     assert checks["quota_window"]["cooling"] is False
 

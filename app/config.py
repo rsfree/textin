@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     # 🔴 默认 **关**：上游信任 X-Forwarded-For，换 IP 即重置匿名配额（实测），
     # 但那是「绕按 IP 试用配额」= 对抗性规避，与本项目立场冲突（见 docs/UPSTREAM.md §4）。
     ROTATE_XFF: bool = False
+    # 出口代理池（逗号分隔的 HTTP 代理 URL）。**空 = 直连**。
+    # 配置后**每个上游请求新建连接**并轮换到下一个代理 —— 轮换的保证来自
+    # 「每请求一个新连接」，不是代理凭据（池通常按 TCP 连接轮换出口）。
+    # 📌 依据（2026-09-24 归因实验）：textin 的 451 是**按出口 IP 的软限**
+    # —— 同 IP 换身份（Chrome ↔ 裸客户端）行为同型，换新 IP 立刻恢复。
+    # ⚠️ 与 ROTATE_XFF 同一性质（绕试用配额），默认空、由部署方决定。
+    PROXY_POOL: str = ""
     # 外链输入的硬上限（调用方传 URL 时由本服务代取）。
     MAX_DOWNLOAD_MB: int = 50
 
