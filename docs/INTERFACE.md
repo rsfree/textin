@@ -17,32 +17,28 @@
 | `POST` | `/v1/images/generations` | **图像族**：图进图出（去水印 / 切边增强 / 去屏幕纹 / 擦除手写） |
 | `POST` | `/v1/files/convert` | **转换族**：文件进文件出（pdf↔word/excel/ppt/image 等 9 项） |
 | `POST` | `/v1/files/parse` | **解析族**：文件进结构化（文字/表格/票据/印章/篡改检测/文档解析/财报） |
-| `GET` | `/v1/models` | 模型清单（OpenAI 兼容：`{"object":"list","data":[模型对象…]}`）—— **免鉴权** |
-| `GET` | `/v1/models/{model}` | 单取一个模型（OpenAI 兼容；与列表**同源同表**）—— **免鉴权** |
+| `GET` | `/v1/models` | 模型清单（OpenAI 兼容：`{"object":"list","data":[四键模型对象…]}`）—— **免鉴权** |
 | `GET` | `/files/{name}` | 结果取件（仅 `response_format=url` 时产生） |
 
 运维端点（**不属于对外契约**）：`GET /healthz`（容器探活）、`GET /readyz`、
 `GET /stats`（要 Key）、`GET /capabilities`（要 Key；全集 + 未注册项与原因）。
 
 鉴权：`Authorization: Bearer <key>`，与 `TEXTIN_API_KEYS`（逗号分隔）做白名单比对。
-**为空 = 关闭鉴权**（仅限内网，启动打 WARNING）。`/v1/models*` 与 `/files/*` 刻意免鉴权。
+**为空 = 关闭鉴权**（仅限内网，启动打 WARNING）。`/v1/models` 与 `/files/*` 刻意免鉴权。
 
-### 0.1 `models` 端点（OpenAI 兼容）
+### 0.1 `models` 端点
 
-**模型对象逐字四键**（多一个键就是契约变更）：
+**逐字四键**（多一个键就是契约变更）：
 
 ```json
 {"id": "textin:demoire", "object": "model", "created": 1790208000, "owned_by": "textin"}
 ```
 
 - `created` = 本服务**能力表的版本时间**（不是上游模型创建时间）；
-- **列表只列本部署可调用的模型**（默认 20 条；`TEXTIN_ALLOW_UNVERIFIED=1` 时 21 条）——
-  列一个调不通的 id 等于把 503 埋给调用方。全集/原因在 `GET /capabilities`；
-- **单取与列表同源同表**：`GET /v1/models/{model}`
-  · 可调用 ⇒ `200` + 上面的四键对象；
-  · 未注册 / 已注册但被门禁挡住 ⇒ `404`，错误信封额外带 OpenAI 的两个键
-    （`type: "invalid_request_error"`、`param: null`），message 里说明原因；
-    **大小写/路径转义按原样**（`textin:pdf-to-word` 直接放进路径即可）。
+- **只列本部署可调用的模型**（默认 20 条；`TEXTIN_ALLOW_UNVERIFIED=1` 时 21 条）——
+  列一个调不通的 id 等于把 503 埋给调用方；全集/原因在 `GET /capabilities`；
+- **刻意不提供** `GET /v1/models/{model}`（单取）：2026-09-24 曾实现并随后按要求收敛掉
+  （网关只需要列表）；它现在返回 404，且有用例钉住这一点（`test_models_single_retrieve_is_not_exposed`）。
 
 ---
 

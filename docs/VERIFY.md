@@ -123,19 +123,6 @@ $V/python scripts/probe.py --phases "" --live --cap textin:watermark-remove
 ⇒ 结论：**textin 的身份维度不可利用**；有效路径只有**换出口 IP**（池），且池里也可能撞到
 已枯节点（需 `451` → 换节点重试）。
 
-## 5.2 OpenAI models 端点补全（2026-09-24）
-
-按要求把 `models` 做成**规范的 OpenAI 兼容端点**（列表 + 单取）：
-
-- 新增 `GET /v1/models/{model}`：可调用 ⇒ `200` 四键 model 对象；
-  未注册 / 被门禁挡住 ⇒ `404 model_not_found`，信封额外带 `type: invalid_request_error`
-  与 `param: null`（OpenAI 的两个键），message 说明原因（门禁项附开启方式）；
-- **同源同表**：`test_models_retrieve_stays_consistent_with_list` 断言
-  「列表里每个 id 单取都 200」（防止两条路各自漂移）；
-- 实机复核（起真服务 curl）：`/v1/models/textin:demoire` → 200；
-  `textin:nope` → 404 + 已知清单；`textin:ofd-to-image` → 404 + 门禁原因。
-- 用例 **89 → 92**（+3），ruff 干净。
-
 ## 6. 关键裁决与理由（2026-09-24）
 
 | 裁决 | 结论 | 理由 |

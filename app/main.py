@@ -196,51 +196,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # ---------- 发现端点 ----------
 
-    def _model_object(name: str) -> dict[str, Any]:
-        """OpenAI 的 model 对象：**逐字四键**（多一个键就是契约变更）。"""
-        from .models import MODEL_RELEASED_AT, OWNED_BY  # noqa: PLC0415
-
-        return {"id": name, "object": "model",
-                "created": MODEL_RELEASED_AT, "owned_by": OWNED_BY}
-
     @app.get("/v1/models")
     async def list_models(request: Request) -> dict[str, Any]:
         """OpenAI 兼容的**列表**端点：只列本部署可调用的模型（免鉴权，与 jimeng 一致）。
 
-        全集（含未取证项的**原因与开启方式**）在 `GET /capabilities`；
-        单取见 `GET /v1/models/{model}`。
+        逐字四键（`id`/`object`/`created`/`owned_by` —— 多一个键就是契约变更）；
+        全集（含未取证项的**原因与开启方式**）在 `GET /capabilities`。
         """
         settings: Settings = request.app.state.settings
         caps = available(allow_unverified=settings.ALLOW_UNVERIFIED)
-        return {"object": "list", "data": [_model_object(name) for name in sorted(caps)]}
+        from .models import MODEL_RELEASED_AT, OWNED_BY  # noqa: PLC0415
 
-    @app.get("/v1/models/{model_id}")
-    async def retrieve_model(request: Request, model_id: str) -> dict[str, Any]:
-        """OpenAI 兼容的**检索单个模型**端点（`GET /v1/models/{model}`）。
-
-        语义与列表**保持一致**（同一张可用性表）：
-        · 可调用 ⇒ 200 + 四键 model 对象；
-        · 未注册 / 已注册但被门禁挡住 ⇒ 404，错误信封额外带 OpenAI 的
-          `type` / `param` 两键（`invalid_request_error` / `null`），
-          并在 message 里说明原因（门禁项会附**开启方式**）。
-        """
-        settings: Settings = request.app.state.settings
-        cap = CAPABILITIES.get(model_id)
-        if cap is None:
-            known = "、".join(sorted(CAPABILITIES))
-            raise ApiError(
-                404, "model_not_found",
-                f"The model '{model_id}' does not exist. 已知：{known}",
-                type="invalid_request_error", param=None,
-            )
-        ok, reason = availability(cap, allow_unverified=settings.ALLOW_UNVERIFIED)
-        if not ok:
-            raise ApiError(
-                404, "model_not_found",
-                f"The model '{model_id}' exists but is not available in this deployment. {reason}",
-                type="invalid_request_error", param=None,
-            )
-        return _model_object(model_id)
+        return {
+            "object": "list",
+            "data": [
+                {"id": name, "object": "model", "created": MODEL_RELEASED_AT, "owned_by": OWNED_BY}
+                for name in sorted(caps)
+            ],
+        }
 
     @app.get("/capabilities")
     async def capabilities(request: Request,

@@ -9,7 +9,6 @@ POST /v1/images/generations   → 200 {data:[{b64_json,mime,size}]}    图像族
 POST /v1/files/convert        → 200 {data:[{b64_json,mime,filename}]} 转换族（pdf↔word/excel/ppt/jpg、word/excel→pdf、图片→pdf）
 POST /v1/files/parse          → 200 {data:[{result,text,attachments}]} 解析族（文字/表格/票据/印章/篡改检测/文档解析/财报）
 GET  /v1/models               → 模型清单（OpenAI 兼容：object=list + 四键模型对象，免鉴权）
-GET  /v1/models/{model}       → 单取一个模型（OpenAI 兼容；与列表同源同表，404 带 type/param）
 GET  /healthz · /readyz · /capabilities · /stats                      运维面
 ```
 
