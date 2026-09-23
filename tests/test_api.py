@@ -116,6 +116,46 @@ def test_models_includes_unverified_when_gate_open(tmp_path):
     assert "textin:ofd-to-image" in ids and len(ids) == 21
 
 
+def test_models_retrieve_is_openai_compatible(tmp_path):
+    """`GET /v1/models/{model}`：OpenAI 的「检索单个模型」。逐字四键 + 404 语义。"""
+    app, _ = _app(tmp_path)
+    with TestClient(app) as c:
+        listed = [m["id"] for m in c.get("/v1/models").json()["data"]]
+        one = c.get(f"/v1/models/{listed[0]}")
+        unknown = c.get("/v1/models/textin:nope")
+        gated = c.get("/v1/models/textin:ofd-to-image")
+    assert one.status_code == 200
+    assert set(one.json()) == {"id", "object", "created", "owned_by"}
+    assert one.json()["object"] == "model" and one.json()["owned_by"] == "textin"
+
+    assert unknown.status_code == 404
+    err = unknown.json()["error"]
+    assert err["code"] == "model_not_found"
+    assert err["type"] == "invalid_request_error"   # OpenAI 兼容键
+    assert err["param"] is None
+    assert "textin:nope" in err["message"]
+
+    # 门禁项：存在但本部署不可用 ⇒ 404，且 message 里给**开启方式**
+    assert gated.status_code == 404
+    assert "TEXTIN_ALLOW_UNVERIFIED" in gated.json()["error"]["message"]
+
+
+def test_models_retrieve_stays_consistent_with_list(tmp_path):
+    """列表与单取必须同源同表（列表里每个 id 都能 200 取到）。"""
+    app, _ = _app(tmp_path)
+    with TestClient(app) as c:
+        ids = [m["id"] for m in c.get("/v1/models").json()["data"]]
+        got = {mid: c.get(f"/v1/models/{mid}").status_code for mid in ids}
+    assert set(got.values()) == {200} and len(ids) == 20
+
+
+def test_models_retrieve_opens_with_gate(tmp_path):
+    app, _ = _app(tmp_path, ALLOW_UNVERIFIED=True)
+    with TestClient(app) as c:
+        r = c.get("/v1/models/textin:ofd-to-image")
+    assert r.status_code == 200 and r.json()["id"] == "textin:ofd-to-image"
+
+
 def test_capabilities_explains_absences(tmp_path):
     app, _ = _app(tmp_path)
     with TestClient(app) as c:
