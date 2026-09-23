@@ -1,0 +1,18 @@
+# 凭据与运行期产物：一律不入库。
+.env
+.env.*
+!.env.example
+var/
+*.log
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+venv/
+.venv/
+
+# 项目记忆（内部工作记录 —— 含未公开结论、本地绝对路径与决策过程）。
+# 与上游参考仓 reverse-proxy 及同仓其它服务的约定一致：记忆与推导不入库。
+# `.dockerignore` 早已排除它，这里补齐 git 侧，避免「镜像里没有、仓库里却有」。
+# ⚠️ 这一条只影响 git，**不要**因此删掉这个目录 —— 它是项目知识，不是缓存。
+.workbuddy/
