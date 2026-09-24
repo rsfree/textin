@@ -224,7 +224,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         回环访问得回环链接、经域名访问得域名链接。
         """
         settings: Settings = request.app.state.settings
-        base = str(request.base_url)          # 结尾自带 "/"
+        # 反代后面：用 `X-Forwarded-Proto` 还原**对外** scheme（nginx 侧已设该头）——
+        # 否则经 https 域名访问时链接会写成 http://（:80 虽会 301，但索引里给错协议是硬伤）。
+        # 只在本端点做：全站开 uvicorn 的 proxy-headers 会顺带改日志/客户端的 IP 口径，
+        # 而这里只需要「链接的协议」这一件事。
+        scheme = (request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
+                  or request.url.scheme)
+        host = request.headers.get("host") or request.url.netloc
+        base = f"{scheme}://{host}/"
         allow = settings.ALLOW_UNVERIFIED
         usable = sorted(available(allow_unverified=allow))
         lines: list[str] = [

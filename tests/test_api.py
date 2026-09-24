@@ -423,6 +423,19 @@ def test_llms_txt_is_public_and_mirrors_the_model_list(tmp_path):
     assert "Bearer" in body and "431" in body and "451" in body
 
 
+def test_llms_txt_honours_forwarded_proto(tmp_path):
+    """反代后面链接要用**对外**协议：`X-Forwarded-Proto: https` ⇒ 索引里是 https 链接。
+
+    nginx 的 `textin-proxy.inc` 已设该头；不认它的话，https 站点会给出 http 链接
+    （能靠 301 兜住，但索引里给错协议是硬伤）。
+    """
+    app, _ = _app(tmp_path)
+    with TestClient(app) as c:
+        body = c.get("/llms.txt", headers={"x-forwarded-proto": "https"}).text
+    assert "https://testserver/v1/models" in body
+    assert "http://testserver/v1/models" not in body
+
+
 def test_llms_txt_lists_gated_capability_when_gate_is_open(tmp_path):
     """门禁打开时：它变成**正常条目**、门禁说明消失（同一份注册表，行为随部署配置）。"""
     app, _ = _app(tmp_path, ALLOW_UNVERIFIED=True)
