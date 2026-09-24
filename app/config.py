@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     MEDIA_DIR: str = "var/media"    # response_format=url 时的落盘目录
     # 431（按天额度打满）后的静默窗（秒）。451 不进静默窗（多节点软限，偶发重试可能成功）。
     QUOTA_COOLDOWN: float = 1800.0
+    # 451（need_register 软限）的**自动重试次数**（0 = 关）。
+    # 依据 2026-09-24 归因实验：451 是**按出口 IP** 的软限（同 IP 换身份行为同型、换新 IP 立刻恢复）
+    # ⇒ 每次重试都新建连接、换池里下一个出口，等价于"换个出口再抽一次签"（实测重试即过）。
+    # 留痕：成功时写进响应 `warnings[]`；仍失败时错误原文后缀"已自动重试 N 次"；span 记 soft_limit_retried。
+    SOFT_LIMIT_RETRY: int = 1
     # 未取证能力闸门：text_auto_removal / ofd-to-image 默认不可用（见 app/models.py）。
     ALLOW_UNVERIFIED: bool = False
 

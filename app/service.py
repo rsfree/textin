@@ -22,7 +22,10 @@ from pathlib import Path
 from typing import Any
 
 from .config import Settings
-from .errors import ApiError, UpstreamDailyQuotaError, UpstreamUnavailableError
+from loguru import logger
+
+from .errors import (ApiError, UpstreamDailyQuotaError, UpstreamQuotaError,
+                     UpstreamUnavailableError)
 from .gate import QuotaWindow
 from .media import image_size, resolve_input, save_media
 from .models import Capability, availability
@@ -170,16 +173,38 @@ async def run(
     }
 
     # ---- 4) 上游调用 ----
+    # 451 软限 ⇒ **自动换出口重试**：每次重试都走 client.call（内部每请求新建连接 = 池里下一个出口）。
+    # dry_run 不触网 ⇒ 天然不重试；431（按天、当天不恢复）也不重试（由 gate 记静默窗）。
+    retries_left = 0 if dry_run else max(0, int(settings.SOFT_LIMIT_RETRY))
     with span("textin.call", service=cap.service, family=family, dry_run=dry_run) as rec:
-        try:
-            envelope = await client.call(cap, blob.data, blob.mime, dry_run=dry_run)
-        except UpstreamDailyQuotaError as exc:
-            cooldown = gate.trip()
-            if cooldown:
-                exc.retry_after = cooldown
-            rec["outcome"] = "daily_quota"
-            raise
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                envelope = await client.call(cap, blob.data, blob.mime, dry_run=dry_run)
+                break
+            except UpstreamDailyQuotaError as exc:
+                cooldown = gate.trip()
+                if cooldown:
+                    exc.retry_after = cooldown
+                rec["outcome"] = "daily_quota"
+                raise
+            except UpstreamQuotaError as exc:                       # 451
+                if retries_left <= 0:
+                    if attempt > 1:                                 # 重试过还是 451：说清楚
+                        exc.message = f"{exc.message}（451 已自动重试 {attempt - 1} 次仍失败）"
+                    rec["outcome"] = "quota"
+                    raise
+                retries_left -= 1
+                rec["soft_limit_retried"] = attempt
+                warnings.append(
+                    "上游 451（need_register）软限：服务已换出口自动重试"
+                    f"（第 {attempt} 次失败，共 {attempt + 1} 次尝试）"
+                )
+                logger.warning("451 软限：换出口重试（service={}，第 {} 次）", cap.service, attempt)
+                continue
         rec["outcome"] = "dry_run" if dry_run else "ok"
+        rec["attempts"] = attempt
 
     # ---- 5) 装配（唯一出口）----
     if dry_run:

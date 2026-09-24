@@ -185,7 +185,7 @@ Content-Type: application/json
 | kind | 状态码 | 含义 | 重试有救吗 |
 |---|---|---|---|
 | `param` | 400 | 上游拒绝请求（service 名/文件类型问题） | 否（改请求） |
-| `quota` | 429 | `451`：该 service 的匿名试用配额用尽 | 偶发可能（多节点软限）；本服务**不自动重试** |
+| `quota` | 429 | `451`：该 service 的匿名试用配额用尽 | 偶发可能（**按出口 IP** 的软限）；**本服务自动换出口重试一次**（`warnings[]` 留痕；`TEXTIN_SOFT_LIMIT_RETRY=0` 可关） |
 | `daily_quota` | 429 | `431`：按天总额度已满 | 否（当天不恢复）⇒ 进**静默窗**并带 `Retry-After` |
 | `timeout` | 504 | 上游超时 | 由调用方决定 |
 | `upstream` | 502 | 其它上游错误（含"`code=200` 但没产物"的静默失败） | — |
@@ -205,7 +205,9 @@ Content-Type: application/json
 
 收到 `431` 后本服务进入静默窗（`TEXTIN_QUOTA_COOLDOWN`，默认 1800s）：
 窗内所有需要触网的能力**直接 429 `daily_quota_cooldown`**，不再打上游。
-`451` **不进静默窗**（多节点软限，偶发重试可能成功，要不要试由调用方决定）。
+`451` **不进静默窗**：服务侧**自动换出口重试一次**（每次重试都新建连接 ⇒ 池里下一个出口；
+成功 ⇒ `warnings[]` 留痕、span 记 `soft_limit_retried`；仍失败 ⇒ 错误原文后缀"已自动重试 N 次"）。
+调用方仍可自行再试；`TEXTIN_SOFT_LIMIT_RETRY` 调重试次数（0=关）。
 🔴 静默窗是**进程内状态**：多 worker 会变 N 份（见 `gunicorn_conf.py`）。
 
 ---

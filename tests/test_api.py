@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.models import CAPABILITIES
+from app.observability import spans
 from app.upstream.textin import TextinClient
 from tests.helpers import (
     DOCX_SMALL,
@@ -325,7 +326,7 @@ def test_daily_quota_trips_window_and_short_circuits(tmp_path):
 
 
 def test_per_service_quota_does_not_trip_window(tmp_path):
-    """451（per-service）不进静默窗：它是多节点软限，偶发重试可能成功，交调用方决定。"""
+    """451 不进静默窗（按出口 IP 的软限），但**每次请求会先自动重试一次** ⇒ 每请求 2 次上游。"""
     hits: list[str] = []
 
     def need_register(req: httpx.Request) -> httpx.Response:
@@ -340,8 +341,51 @@ def test_per_service_quota_does_not_trip_window(tmp_path):
         r2 = c.post("/v1/images/generations",
                     json={"model": "textin:watermark-remove", "image": data_uri(PNG_SMALL)})
     assert r1.status_code == 429 and r1.json()["error"]["kind"] == "quota"
-    assert r2.status_code == 429 and len(hits) == 2  # 第二次照样打到上游
+    assert r2.status_code == 429 and len(hits) == 4      # 2 请求 × (1 首发 + 1 自动重试)
+    # 重试过还是 451 ⇒ 错误原文要说清楚（否则调用方以为只打了一次）
+    assert "已自动重试 1 次仍失败" in r1.json()["error"]["message"]
     assert "TEXTIN_TOKEN" in r1.json()["error"]["message"]
+
+
+def test_soft_limit_retries_once_then_succeeds_with_warning(tmp_path):
+    """451 软限：**自动换出口重试一次**（每请求新建连接）；成功时在 `warnings[]` 与 span 里留痕。"""
+    hits: list[str] = []
+
+    def first_451_then_ok(req: httpx.Request) -> httpx.Response:
+        hits.append(str(req.url))
+        if len(hits) == 1:
+            return json_response(error_envelope(451, "need_register"))
+        return _ok_image(req)
+
+    app, _ = _app(tmp_path)
+    with TestClient(app) as c:
+        _inject(app, first_451_then_ok)
+        r = c.post("/v1/images/generations",
+                   json={"model": "textin:watermark-remove", "image": data_uri(PNG_SMALL)})
+    body = r.json()
+    assert r.status_code == 200 and len(hits) == 2                 # 恰好一次重试
+    assert body["upstream"]["code"] == 200
+    assert any("451" in w and "重试" in w for w in body["warnings"]), body["warnings"]
+    calls = [s for s in spans() if s.get("stage") == "textin.call"]
+    assert calls and calls[-1].get("soft_limit_retried") == 1      # 追踪层也留痕
+    assert calls[-1].get("attempts") == 2
+
+
+def test_soft_limit_retry_can_be_disabled(tmp_path):
+    """`TEXTIN_SOFT_LIMIT_RETRY=0` ⇒ 关掉自动重试（上游只被打了 1 次）——口子必须真的接线。"""
+    hits: list[str] = []
+
+    def always_451(req: httpx.Request) -> httpx.Response:
+        hits.append(str(req.url))
+        return json_response(error_envelope(451, "need_register"))
+
+    app, _ = _app(tmp_path, SOFT_LIMIT_RETRY=0)
+    with TestClient(app) as c:
+        _inject(app, always_451)
+        r = c.post("/v1/images/generations",
+                   json={"model": "textin:watermark-remove", "image": data_uri(PNG_SMALL)})
+    assert r.status_code == 429 and len(hits) == 1
+    assert "已自动重试" not in r.json()["error"]["message"]
 
 
 # --------------------------------------------------------------------- 校验

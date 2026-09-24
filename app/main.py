@@ -177,6 +177,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # 出口形态要可见（凭据已脱敏）：池配了没有、几个入口、都是谁
             "egress_proxies": _client(request).masked_proxies(),
             "allow_unverified": allow,
+            "soft_limit_retry": int(s.SOFT_LIMIT_RETRY),   # 451 自动重试次数（0=关）
             "media_dir": s.MEDIA_DIR,
             "quota_window": gate.snapshot(),
             "capabilities": {
