@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.models import CAPABILITIES
 from app.upstream.textin import TextinClient
 from tests.helpers import (
     DOCX_SMALL,
@@ -392,3 +393,73 @@ def test_response_format_url_mirrors_and_serves(tmp_path):
     assert url.startswith("/files/")
     assert served.status_code == 200 and served.content == JPEG_SMALL
     assert (media / url.rsplit("/", 1)[1]).read_bytes() == JPEG_SMALL
+
+
+def test_llms_txt_is_public_and_mirrors_the_model_list(tmp_path):
+    """`/llms.txt`（llmstxt.org 约定）：免鉴权 + Markdown + **与 /v1/models 同表**。
+
+    硬断言：三族小节齐；每个可调用模型**逐条列出**（用注册表的 `label`，不是排障用的 notes）；
+    门禁项不作为条目出现，但要在**一行门禁说明**里点名（否则读者不知道它存在）；
+    链接基址随调用方（TestClient 的基址是 http://testserver/）。
+    """
+    app, _ = _app(tmp_path)
+    with TestClient(app) as c:
+        r = c.get("/llms.txt")                       # 不带任何鉴权头
+        usable = [m["id"] for m in c.get("/v1/models").json()["data"]]
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/markdown")
+    body = r.text
+    assert body.startswith("# textin-service")
+    assert body.splitlines()[2].startswith("> ")      # 摘要 blockquote（llms.txt 约定）
+    for fam in ("图像族", "转换族", "解析族"):
+        assert fam in body, fam
+    missing = [mid for mid in usable if f"- `{mid}` — " not in body]
+    assert not missing, f"llms.txt 漏列：{missing}"
+    model_bullets = [ln for ln in body.splitlines() if ln.startswith("- `textin:")]
+    assert len(model_bullets) == len(usable) == 20
+    assert "- `textin:ofd-to-image` — " not in body, "门禁项不应作为可调用条目出现"
+    assert "🔒" in body and "`textin:ofd-to-image`" in body, "门禁项要在一行说明里被点名"
+    assert "http://testserver/v1/models" in body, "链接必须用调用方看到的基址"
+    assert "Bearer" in body and "431" in body and "451" in body
+
+
+def test_llms_txt_lists_gated_capability_when_gate_is_open(tmp_path):
+    """门禁打开时：它变成**正常条目**、门禁说明消失（同一份注册表，行为随部署配置）。"""
+    app, _ = _app(tmp_path, ALLOW_UNVERIFIED=True)
+    with TestClient(app) as c:
+        body = c.get("/llms.txt").text
+        usable = [m["id"] for m in c.get("/v1/models").json()["data"]]
+    assert "- `textin:ofd-to-image` — " in body
+    assert "🔒" not in body
+    assert len([ln for ln in body.splitlines() if ln.startswith("- `textin:")]) == len(usable) == 21
+
+
+def test_registry_invariants_name_matches_key_and_label_present():
+    """注册表不变量（**这条门禁是补的，也因为它的缺失放过了一个实测 bug**）。
+
+    2026-09-24 实测：`textin:table-excel` 的 `name=` 被复制粘贴成 `textin:table`，
+    而 `cap.name` 被 service 层用于响应回显/报错/门禁文案 ⇒ 请求 `table-excel` 时
+    响应里的 `model` 字段回显成了 `table`（下游按 model 归因会记错）。
+    这里把两条不变量钉死：`name == key`、`label` 非空（llms.txt 等索引用它）。
+    """
+    bad = [k for k, v in CAPABILITIES.items() if v.name != k]
+    assert not bad, f"name 与注册键不一致：{bad}"
+    unlabeled = [k for k, v in CAPABILITIES.items() if not v.label.strip()]
+    assert not unlabeled, f"缺 label（llms.txt 等索引会退回 service 名）：{unlabeled}"
+
+
+def test_table_excel_echoes_its_own_model_name(tmp_path):
+    """bug 回归钉：`textin:table-excel` 的响应 `model` 必须是它自己（不是 `textin:table`）。
+
+    两者 service 相同、只差 `excel=1/0` ⇒ 回显错也"看起来很正常"，正因如此必须显式钉住。
+    """
+    app, _ = _app(tmp_path)
+    with TestClient(app) as c:
+        got = {}
+        for mid in ("textin:table", "textin:table-excel"):
+            j = c.post("/v1/files/parse", headers={"authorization": "Bearer test-key"}, json={
+                "model": mid, "file": data_uri(PNG_SMALL), "dry_run": True,
+            }).json()
+            got[mid] = (j["model"], j["effective"]["params"]["excel"])
+    assert got["textin:table"] == ("textin:table", "0")
+    assert got["textin:table-excel"] == ("textin:table-excel", "1")

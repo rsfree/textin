@@ -18,6 +18,7 @@
 | `POST` | `/v1/files/convert` | **转换族**：文件进文件出（pdf↔word/excel/ppt/image 等 9 项） |
 | `POST` | `/v1/files/parse` | **解析族**：文件进结构化（文字/表格/票据/印章/篡改检测/文档解析/财报） |
 | `GET` | `/v1/models` | 模型清单（OpenAI 兼容：`{"object":"list","data":[四键模型对象…]}`）—— **免鉴权** |
+| `GET` | `/llms.txt` | **LLM/Agent 站点索引**（[llmstxt.org](https://llmstxt.org) 约定：`# 标题` + `> 摘要` + 分节链接）—— **免鉴权** |
 | `GET` | `/files/{name}` | 结果取件（仅 `response_format=url` 时产生） |
 
 运维端点（**不属于对外契约**）：`GET /healthz`（容器探活）、`GET /readyz`、
@@ -39,6 +40,17 @@
   列一个调不通的 id 等于把 503 埋给调用方；全集/原因在 `GET /capabilities`；
 - **刻意不提供** `GET /v1/models/{model}`（单取）：2026-09-24 曾实现并随后按要求收敛掉
   （网关只需要列表）；它现在返回 404，且有用例钉住这一点（`test_models_single_retrieve_is_not_exposed`）。
+
+### 0.2 `GET /llms.txt`（LLM/Agent 站点索引）
+
+给 AI Agent 的**一页纸索引**（llmstxt.org 约定，`text/markdown`）：
+
+- **内容由注册表生成**，不手写清单 ⇒ 不会与 `/v1/models` 漂移
+  （用例钉住：模型条数 == `/v1/models` 条数，且每条用注册表的 `label`）；
+- 只列**本部署可调用**的；未取证项不列条目，但在末尾用一行 `🔒 …` **点名**
+  （说清"它存在、被门禁挡住、去哪看原因"）；
+- 链接基址 = **调用方看到的基址**（回环访问得回环链接，经域名访问得域名链接）；
+- 免鉴权（与 `/v1/models` 同属发现面）。
 
 ---
 

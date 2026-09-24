@@ -123,6 +123,20 @@ $V/python scripts/probe.py --phases "" --live --cap textin:watermark-remove
 ⇒ 结论：**textin 的身份维度不可利用**；有效路径只有**换出口 IP**（池），且池里也可能撞到
 已枯节点（需 `451` → 换节点重试）。
 
+## 5.3 `GET /llms.txt` + 注册表 bug 修复（2026-09-24）
+
+- 新增 **`/llms.txt`**（llmstxt.org 约定，免鉴权，**内容由注册表生成**）：用例钉
+  「模型条数 == `/v1/models` 条数」「未取证项不作为条目、但被一行 `🔒` 说明点名」
+  「链接用调用方看到的基址」。全量用例 **90 → 94**。
+- 🔴 **补这条索引时发现并修了一个实测 bug**：注册表里 `textin:table-excel` 的 `name=`
+  被复制粘贴成 `textin:table` ⇒ 请求 `table-excel` 时**响应里的 `model` 字段回显成 `textin:table`**
+  （`cap.name` 被 service 层的响应回显、错端点报错、门禁文案**四处**消费；下游按 model 归因会记错）。
+  取证：修复前 `effective/顶层 model` 都是 `textin:table`；修复后为 `textin:table-excel`。
+- 同时补两条注册表门禁（此前**没有**，正是因为缺失才放过上面那个 bug）：
+  `cap.name == key`、`cap.label` 非空；**变异自证**：清空任一 label ⇒ 门禁红（rc=1），还原 ⇒ 绿。
+- 与之配套：注册表新增 `label` 字段（21 条全部填好），`/llms.txt` 用 `label` 而不是截 `notes`
+  —— `notes` 是排障文本、常以半句话开头（「输出会被裁边」「全表唯一例外」），截出来不可读。
+
 ## 6. 关键裁决与理由（2026-09-24）
 
 | 裁决 | 结论 | 理由 |
@@ -136,7 +150,7 @@ $V/python scripts/probe.py --phases "" --live --cap textin:watermark-remove
 Jev 咨询原文（`jev-1.13.0`，五项判定与把握度）见
 `.workbuddy/memory/2026-09-24.md`；上游站点现状复核见 `UPSTREAM.md §8`。
 
-## 6. 本机产物（不入库）
+## 7. 本机产物（不入库）
 
 - `var/live/*`（§4 的真实产物与报告）、`var/media/*`（`response_format=url` 的落盘）
 - `.env` 不存在（本服务匿名可用；要配 `TEXTIN_TOKEN` 时自行创建，已在 `.gitignore`）

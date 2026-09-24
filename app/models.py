@@ -69,6 +69,9 @@ class Capability:
     name: str                       # 对外模型名，如 textin:watermark-remove
     family: Family                  # 归属的端点族（image=图片面 / convert / parse）
     service: str                    # 上游 service 名（**逐字照抄实测，不猜**）
+    #: 面向人/Agent 的一行短标签（`/llms.txt` 等索引用；与排障用的 `notes` 分开 ——
+    #: notes 常以半句话开头（如「输出会被裁边」「全表唯一例外」），直接截断当标签会很难读）
+    label: str = ""
     #: 附加 query（顺序固定）。目前只有 `table&excel=1` 与 `pdf_to_markdown` 两组。
     service_params: tuple[tuple[str, str], ...] = ()
     #: 可接受的输入家族（resolve 时按嗅探结果校验，不在集合内 ⇒ 400 并说清期望）
@@ -92,6 +95,7 @@ CAPABILITIES: dict[str, Capability] = {
     # ------------------------------------------------------------- 图像族（图进图出）
     "textin:watermark-remove": Capability(
         name="textin:watermark-remove",
+        label="去水印",
         family="image",
         service="watermark-remove",
         accepts=_IMAGE_KINDS,
@@ -101,6 +105,7 @@ CAPABILITIES: dict[str, Capability] = {
     ),
     "textin:crop-enhance": Capability(
         name="textin:crop-enhance",
+        label="切边增强矫正",
         family="image",
         service="crop_enhance_image",
         accepts=_IMAGE_OR_PDF,
@@ -110,6 +115,7 @@ CAPABILITIES: dict[str, Capability] = {
     ),
     "textin:demoire": Capability(
         name="textin:demoire",
+        label="去屏幕纹（摩尔纹）",
         family="image",
         service="demoire",
         accepts=_IMAGE_OR_PDF,
@@ -119,6 +125,7 @@ CAPABILITIES: dict[str, Capability] = {
     ),
     "textin:text-auto-removal": Capability(
         name="textin:text-auto-removal",
+        label="擦除手写文字",
         family="image",
         service="text_auto_removal",
         accepts=_IMAGE_KINDS,
@@ -136,24 +143,28 @@ CAPABILITIES: dict[str, Capability] = {
     # ------------------------------------------------------------- 转换族（文件进文件出）
     "textin:pdf-to-word": Capability(
         name="textin:pdf-to-word",
+        label="PDF → Word",
         family="convert", service="pdf-to-word",
         accepts=("pdf",), output="file", output_ext=".docx", output_mime=_DOCX_MIME,
         evidence="out2/test_pdf-to-word.docx（ZIP 内含 word/document.xml）",
     ),
     "textin:pdf-to-excel": Capability(
         name="textin:pdf-to-excel",
+        label="PDF → Excel",
         family="convert", service="pdf-to-excel",
         accepts=("pdf",), output="file", output_ext=".xlsx", output_mime=_XLSX_MIME,
         evidence="out2/test_pdf-to-excel.xlsx",
     ),
     "textin:pdf-to-ppt": Capability(
         name="textin:pdf-to-ppt",
+        label="PDF → PPT",
         family="convert", service="pdf-to-ppt",
         accepts=("pdf",), output="file", output_ext=".pptx", output_mime=_PPTX_MIME,
         evidence="out2/test_pdf-to-ppt.pptx（ZIP，17 entries）",
     ),
     "textin:pdf-to-image": Capability(
         name="textin:pdf-to-image",
+        label="PDF → 图片（zip）",
         family="convert", service="pdf-to-image",
         accepts=("pdf",), output="file", output_ext=".zip", output_mime=_ZIP_MIME,
         evidence="out2/test_pdf-to-image.zip（ZIP 内含 1.jpg…）",
@@ -161,12 +172,14 @@ CAPABILITIES: dict[str, Capability] = {
     ),
     "textin:word-to-pdf": Capability(
         name="textin:word-to-pdf",
+        label="Word → PDF",
         family="convert", service="word-to-pdf",
         accepts=("docx", "doc"), output="file", output_ext=".pdf", output_mime=_PDF_MIME,
         evidence="out2/test_word-to-pdf.pdf（%PDF-1.7）",
     ),
     "textin:word-to-image": Capability(
         name="textin:word-to-image",
+        label="Word → 图片（zip）",
         family="convert", service="word-to-image",
         accepts=("docx", "doc"), output="file", output_ext=".zip", output_mime=_ZIP_MIME,
         evidence="out2/test_word-to-image.zip",
@@ -174,6 +187,7 @@ CAPABILITIES: dict[str, Capability] = {
     ),
     "textin:excel-to-pdf": Capability(
         name="textin:excel-to-pdf",
+        label="Excel/CSV → PDF",
         family="convert", service="excel-to-pdf",
         accepts=("xlsx", "xls", "csv"), output="file", output_ext=".pdf", output_mime=_PDF_MIME,
         evidence="out2/test_excel-to-pdf.pdf",
@@ -181,6 +195,7 @@ CAPABILITIES: dict[str, Capability] = {
     ),
     "textin:image-to-pdf": Capability(
         name="textin:image-to-pdf",
+        label="图片 → PDF",
         family="convert", service="image-to-pdf",
         accepts=_IMAGE_KINDS, output="file", output_ext=".pdf", output_mime=_PDF_MIME,
         evidence="out2/wm_sample_image-to-pdf.pdf",
@@ -188,6 +203,7 @@ CAPABILITIES: dict[str, Capability] = {
     ),
     "textin:ofd-to-image": Capability(
         name="textin:ofd-to-image",
+        label="OFD → 图片（zip，未取证）",
         family="convert", service="ofd-to-image",
         accepts=("ofd",), output="file", output_ext=".zip", output_mime=_ZIP_MIME,
         verified=False,
@@ -203,6 +219,7 @@ CAPABILITIES: dict[str, Capability] = {
     # ------------------------------------------------------------- 解析族（文件进结构化出）
     "textin:text-recognize": Capability(
         name="textin:text-recognize",
+        label="通用文字识别（逐行）",
         family="parse", service="text_recognize_3d1",
         accepts=_IMAGE_KINDS,
         evidence="out2/wm_sample_text_recognize_3d1.json.json",
@@ -210,13 +227,15 @@ CAPABILITIES: dict[str, Capability] = {
     ),
     "textin:table": Capability(
         name="textin:table",
+        label="表格识别",
         family="parse", service="table", service_params=(("excel", "0"),),
         accepts=_IMAGE_KINDS,
         evidence="out2/wm_sample_table.zip（服务端返回的表结构）",
         notes="result.tables[]（table_cells/rows/cols）",
     ),
     "textin:table-excel": Capability(
-        name="textin:table",
+        name="textin:table-excel",
+        label="表格识别（附 Excel 附件）",
         family="parse", service="table", service_params=(("excel", "1"),),
         accepts=_IMAGE_KINDS,
         b64_attachments=(("excel", ".xlsx", _XLSX_MIME),),
@@ -225,6 +244,7 @@ CAPABILITIES: dict[str, Capability] = {
     ),
     "textin:bill-recognize": Capability(
         name="textin:bill-recognize",
+        label="票据识别",
         family="parse", service="bill_recognize_v2",
         accepts=_IMAGE_OR_PDF,
         evidence="out2/wm_sample_bill_recognize_v2.json.json",
@@ -232,6 +252,7 @@ CAPABILITIES: dict[str, Capability] = {
     ),
     "textin:manipulation-detection": Capability(
         name="textin:manipulation-detection",
+        label="图片篡改检测",
         family="parse", service="manipulation_detection",
         accepts=_IMAGE_OR_PDF,
         evidence="out2/wm_sample_manipulation_detection.json.json",
@@ -239,6 +260,7 @@ CAPABILITIES: dict[str, Capability] = {
     ),
     "textin:recognize-stamp": Capability(
         name="textin:recognize-stamp",
+        label="印章识别",
         family="parse", service="recognize_stamp",
         accepts=_IMAGE_OR_PDF,
         evidence="out2/wm_sample_recognize_stamp.json",
@@ -246,6 +268,7 @@ CAPABILITIES: dict[str, Capability] = {
     ),
     "textin:doc-parse": Capability(
         name="textin:doc-parse",
+        label="文档解析（Markdown）",
         family="parse", service="pdf_to_markdown",
         service_params=(("markdown_details", "1"),),
         accepts=_IMAGE_OR_PDF,
@@ -257,6 +280,7 @@ CAPABILITIES: dict[str, Capability] = {
     ),
     "textin:finance-report": Capability(
         name="textin:finance-report",
+        label="财报解析",
         family="parse", service="pdf_to_markdown",
         service_params=(
             ("page_start", "0"), ("page_count", "200"), ("dpi", "144"),
