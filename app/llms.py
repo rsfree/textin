@@ -46,6 +46,9 @@ DOCUMENTED_PATHS: tuple[str, ...] = (
 #: **刻意不写进索引**的路由 → 理由（对账门禁要求每条都有理由，禁止静默豁免）
 EXCLUDED_ROUTES: dict[str, str] = {
     "/stats": "运维端点，要鉴权；不进对外索引",
+    "/": "人类着陆页（回答「下一步去哪」）；索引本就是给 Agent 的入口，不必再指向自己",
+    "/favicon.svg": "浏览器图标，非 API",
+    "/favicon.ico": "同上（返回 204 让老客户端静默）",
     "/files": "静态取件挂载，正文以 `/files/*` 一句话说明（不逐条列）",
     "/redoc": "FastAPI 自带的 Redoc，与 /docs 重复",
     "/docs/oauth2-redirect": "Swagger 的 OAuth 回调，框架内部用",

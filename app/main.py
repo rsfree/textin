@@ -22,7 +22,7 @@ from typing import Annotated, Any
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
@@ -81,6 +81,36 @@ def _dry_run_flag(request: Request, payload: dict[str, Any]) -> bool:
     if header in ("1", "true", "yes"):
         return True
     return bool(payload.get("dry_run"))
+
+
+#: 站点着陆页（人类入口）。刻意极简 —— 这是个 API 服务，首页只回答"下一步去哪"；
+#: ⚠️ 用 `str.replace` 注入版本而**不是** `str.format`：页面里有 CSS 花括号。
+_INDEX_HTML = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>textin-service</title><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>body{font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,
+sans-serif;max-width:46rem;margin:6vh auto;padding:0 1.2rem;color:#16181d}
+h1{font-size:1.35rem;margin:0 0 .4rem}code{background:#f2f3f5;padding:.1rem .35rem;border-radius:4px}
+li{margin:.4rem 0}footer{color:#6b7280;font-size:.85rem;margin-top:1.4rem}
+a{color:#0b62d0;text-decoration:none}a:hover{text-decoration:underline}</style></head><body>
+<h1>textin-service</h1>
+<p>TextIn（tools.textin.com）的同步出口：<b>图像处理 / 文档转换 / 识别解析</b>三族，
+统一成三类动作，模型名走 OpenAI 兼容发现端点。</p>
+<ul>
+<li><a href="/docs">交互式文档 /docs</a>（OpenAPI：<a href="/openapi.json">/openapi.json</a>）</li>
+<li><a href="/llms.txt">/llms.txt</a> —— 站点索引（给 LLM / Agent 读）</li>
+<li><a href="/v1/models">/v1/models</a> —— 本部署可调用的模型清单（免鉴权）</li>
+<li>业务端点：<code>POST /v1/images/generations</code>　<code>POST /v1/files/convert</code>　
+<code>POST /v1/files/parse</code></li>
+</ul>
+<p>鉴权：<code>Authorization: Bearer &lt;key&gt;</code>（<code>/v1/models</code>、<code>/llms.txt</code>、
+<code>/docs</code>、<code>/files/*</code> 免鉴权）</p>
+<footer>版本 {version} ｜ <a href="https://github.com/rsfree/textin">源码与契约（INTERFACE.md）</a> ｜
+<a href="/llms.txt">/llms.txt</a></footer></body></html>"""
+
+#: 站点图标（一个方框里的 "T"，内联 SVG —— 不引入静态资源目录）
+_FAVICON_SVG = ("""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">"""
+                """<rect width="64" height="64" rx="14" fill="#0b62d0"/>"""
+                """<path d="M16 20h32v8H36v24h-8V28H16z" fill="#fff"/></svg>""")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -205,6 +235,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "quota_window": _gate(request).snapshot(),
             "spans": spans()[-50:],
         }
+
+    # ---------- 站点边角（人类/浏览器用；不属于对外 API 契约，故不进 OpenAPI schema） ----------
+
+    @app.get("/", include_in_schema=False)
+    async def index() -> HTMLResponse:
+        """着陆页：根路径此前是 `{"detail":"Not Found"}`——人打开站点会以为"没部署好"。"""
+        return HTMLResponse(_INDEX_HTML.replace("{version}", __version__))
+
+    @app.get("/favicon.svg", include_in_schema=False)
+    async def favicon() -> Response:
+        return Response(_FAVICON_SVG, media_type="image/svg+xml",
+                        headers={"cache-control": "public, max-age=86400"})
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon_ico() -> Response:
+        """没有 .ico（现代浏览器用 /favicon.svg）；204 让老客户端静默 —— 此前 404 会留脏日志。"""
+        return Response(status_code=204)
 
     # ---------- 发现端点 ----------
 

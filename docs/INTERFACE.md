@@ -19,6 +19,7 @@
 | `POST` | `/v1/files/parse` | **解析族**：文件进结构化（文字/表格/票据/印章/篡改检测/文档解析/财报） |
 | `GET` | `/v1/models` | 模型清单（OpenAI 兼容：`{"object":"list","data":[四键模型对象…]}`）—— **免鉴权** |
 | `GET` | `/llms.txt` | **LLM/Agent 站点索引**（[llmstxt.org](https://llmstxt.org) 约定：`# 标题` + `> 摘要` + 分节链接）—— **免鉴权** |
+| `GET` | `/` ｜ `/favicon.svg` ｜ `/favicon.ico` | 站点边角（人类着陆页 + 图标，**免鉴权**、`include_in_schema=False` 不进 OpenAPI）—— 不属于对外 API 契约 |
 | `GET` | `/files/{name}` | 结果取件（仅 `response_format=url` 时产生） |
 
 运维端点（**不属于对外契约**）：`GET /healthz`（容器探活）、`GET /readyz`、

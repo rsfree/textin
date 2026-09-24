@@ -13,6 +13,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from app import __version__
 from app.main import create_app
 from app.models import CAPABILITIES
 from app.observability import report, reset_spans, spans
@@ -488,6 +489,21 @@ def test_response_format_url_mirrors_and_serves(tmp_path):
     assert url.startswith("/files/")
     assert served.status_code == 200 and served.content == JPEG_SMALL
     assert (media / url.rsplit("/", 1)[1]).read_bytes() == JPEG_SMALL
+
+
+def test_root_landing_and_favicon_are_public(tmp_path):
+    """站点边角：`/` 是着陆页（此前 404，人打开会以为没部署好）、`/favicon.svg` 图标、`/favicon.ico` 204。
+
+    三者在**鉴权开着**时也必须免鉴权（它们是给人和浏览器的），且着陆页要含下一步入口与版本号。
+    """
+    app, _ = _app(tmp_path, API_KEYS="k-1")          # 鉴权开着
+    with TestClient(app) as c:
+        root, svg, ico = c.get("/"), c.get("/favicon.svg"), c.get("/favicon.ico")
+    assert root.status_code == 200 and root.headers["content-type"].startswith("text/html")
+    for need in ("/docs", "/llms.txt", "/v1/models", __version__):
+        assert need in root.text, need                # 版本注入用的是 replace（页面里有 CSS 花括号）
+    assert svg.status_code == 200 and svg.headers["content-type"].startswith("image/svg")
+    assert ico.status_code == 204
 
 
 def test_llms_txt_route_wiring(tmp_path):

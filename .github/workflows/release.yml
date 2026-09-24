@@ -195,6 +195,10 @@ jobs:
           curl -sf http://127.0.0.1:18700/v1/models | tee /tmp/models.json; echo
           python3 -c "import json;d=json.load(open('/tmp/models.json'));ids=[m['id'] for m in d['data']];assert len(ids)==20,len(ids);assert 'textin:watermark-remove' in ids,ids;assert 'textin:ofd-to-image' not in ids,ids;assert 'textin:pdf-to-word' in ids,ids"
 
+          # 站点边角：根路径是着陆页（不是 404）、图标在（人打开域名第一眼看到的东西）
+          curl -sf http://127.0.0.1:18700/ | grep -q 'textin-service'
+          curl -sf http://127.0.0.1:18700/favicon.svg | grep -q '<svg'
+
           # 站点索引：免鉴权可拿，且必须列出可调用能力（内容由注册表生成）
           curl -sf http://127.0.0.1:18700/llms.txt | tee /tmp/llms.txt > /dev/null
           head -1 /tmp/llms.txt | grep -q '^# textin-service'
