@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import sys
 import time
+from collections import deque
 from contextlib import contextmanager
 from typing import Any, Iterator
 
@@ -27,7 +28,11 @@ __all__ = ["setup", "report", "span", "spans", "reset_spans"]
 _CONFIGURED = False
 _LOGFIRE: Any = None
 _CAPTURE = True
-_SPANS: list[dict[str, Any]] = []
+#: 进程内 span 缓冲上限。**必须有界** —— 这里曾是无限增长的 list：每个请求 append 2~3 条，
+#: 长跑会随请求数线性吃内存（2026-09-24 审计发现）；有界之后顺带把"排障窗口"从"最后 50 条"
+#: 提到 200 条，`/stats` 仍按 `[-50:]` 截尾展示。
+_SPANS_MAX = 200
+_SPANS: deque[dict[str, Any]] = deque(maxlen=_SPANS_MAX)
 
 
 def setup(

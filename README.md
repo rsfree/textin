@@ -11,6 +11,7 @@ POST /v1/files/parse          → 200 {data:[{result,text,attachments}]} 解析�
 GET  /v1/models               → 模型清单（OpenAI 兼容：object=list + 四键模型对象，免鉴权）
 GET  /llms.txt                → LLM/Agent 站点索引（llmstxt.org 约定，内容由注册表生成，免鉴权）
 GET  /healthz · /readyz · /capabilities · /stats                      运维面
+🔴 鉴权 fail-closed：`TEXTIN_API_KEYS` 为空 ⇒ **拒绝启动**（无鉴权须显式 TEXTIN_ALLOW_NO_AUTH=1）
 ```
 
 - **对外契约全文**：**[`docs/INTERFACE.md`](docs/INTERFACE.md)**（冻结）

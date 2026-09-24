@@ -142,6 +142,14 @@ $V/python scripts/probe.py --phases "" --live --cap textin:watermark-remove
 - 与之配套：注册表新增 `label` 字段（21 条全部填好），`/llms.txt` 用 `label` 而不是截 `notes`
   —— `notes` 是排障文本、常以半句话开头（「输出会被裁边」「全表唯一例外」），截出来不可读。
 
+## 5.4 fail-closed + 观测性三修（2026-09-24 下午，事故驱动）
+
+| 项 | 改动 | 判据 |
+|---|---|---|
+| 🔴 **fail-closed** | `API_KEYS` 为空 + 未显式豁免（新口子 `TEXTIN_ALLOW_NO_AUTH`）⇒ lifespan **抛错拒绝启动**；/readyz 自报 `allow_no_auth` | 用例：拒绝启动（`pytest.raises`）/ 豁免下起且自报 / **鉴权开着的 401·200 成对**；CI 冒烟加"无凭据 ⇒ 拒绝启动 + 原因可 grep" |
+| **span 缓冲有界** | 曾是**无限 list**（每请求 append 2~3 条 ⇒ 长跑线性吃内存）⇒ `deque(maxlen=200)`（排障窗口 50→200） | 用例：灌 250 条后 `len==200` 且丢最旧 |
+| **失败留痕** | 上游失败（431 / 451 重试耗尽 / 其余 `UpstreamError`）各打一行日志（param 类用 INFO）—— 此前**失败不写日志**，当天查 429 只能靠访问行反推 | 见 429 排查记录（§5.3 之前） |
+
 ## 6. 关键裁决与理由（2026-09-24）
 
 | 裁决 | 结论 | 理由 |

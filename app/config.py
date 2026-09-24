@@ -49,7 +49,11 @@ class Settings(BaseSettings):
     PORT: int = 8600
     LOG_LEVEL: str = "INFO"
     MEDIA_DIR: str = "var/media"    # response_format=url 时的落盘目录
-    # 431（按天额度打满）后的静默窗（秒）。451 不进静默窗（多节点软限，偶发重试可能成功）。
+    # 无鉴权的**显式豁免**：`API_KEYS` 为空时默认**拒绝启动**（fail-closed）。
+    # 2026-09-24 事故：空值只打 WARNING ⇒ 服务在公网上无鉴权跑了数小时没人发现。
+    # 内网/干跑确实要无鉴权时，显式设 1，且 /readyz 会自报 `api_keys_enabled=false`。
+    ALLOW_NO_AUTH: bool = False
+    # 431（按天额度打满）后的静默窗（秒）。451 不进静默窗（按出口 IP 的软限，服务自动换出口重试一次）。
     QUOTA_COOLDOWN: float = 1800.0
     # 451（need_register 软限）的**自动重试次数**（0 = 关）。
     # 依据 2026-09-24 归因实验：451 是**按出口 IP** 的软限（同 IP 换身份行为同型、换新 IP 立刻恢复）

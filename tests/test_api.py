@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.models import CAPABILITIES
-from app.observability import spans
+from app.observability import report, reset_spans, spans
 from app.upstream.textin import TextinClient
 from tests.helpers import (
     DOCX_SMALL,
@@ -323,6 +323,57 @@ def test_daily_quota_trips_window_and_short_circuits(tmp_path):
     assert second.status_code == 429
     assert second.json()["error"]["code"] == "daily_quota_cooldown"
     assert len(hits) == 1, "静默窗内不许再打上游"
+
+
+def test_auth_on_requires_key_and_accepts_key(tmp_path):
+    """成对断言（鉴权**开着**的世界）：无 header ⇒ 401；带 header ⇒ 200。
+
+    与 `test_empty_keys_*` 两条一起，把 auth 的四种组合钉住：
+    （空 keys × 豁免关）= 拒绝启动 ｜ （空 keys × 豁免开）= 起但自报 ｜ （有 keys × 无 header）= 401 ｜
+    （有 keys × 有 header）= 200。
+    """
+    app, _ = _app(tmp_path, API_KEYS="k-1")
+    body = {"model": "textin:watermark-remove", "image": data_uri(PNG_SMALL), "dry_run": True}
+    with TestClient(app) as c:
+        assert c.post("/v1/images/generations", json=body).status_code == 401
+        assert c.post("/v1/images/generations", json=body,
+                      headers={"authorization": "Bearer k-1"}).status_code == 200
+
+
+def test_empty_keys_refuse_to_start(tmp_path):
+    """🔴 fail-closed：`TEXTIN_API_KEYS` 为空且未豁免 ⇒ **拒绝启动**（不是打行 WARNING 继续裸奔）。
+
+    2026-09-24 事故根因：空值只打 WARNING ⇒ 服务在公网上无鉴权跑了数小时没人发现。
+    这条用例是那次事故的回归钉。
+    """
+    app, _ = _app(tmp_path, API_KEYS="", ALLOW_NO_AUTH=False)
+    with pytest.raises(RuntimeError, match="TEXTIN_API_KEYS 为空"):
+        with TestClient(app):
+            pass
+
+
+def test_empty_keys_with_explicit_optin_starts_and_self_reports(tmp_path):
+    """成对断言：**显式豁免**（`TEXTIN_ALLOW_NO_AUTH=1`）才允许无鉴权起，且 `/readyz` 自报。"""
+    app, _ = _app(tmp_path, API_KEYS="", ALLOW_NO_AUTH=True)
+    with TestClient(app) as c:
+        checks = c.get("/readyz").json()["checks"]
+        # 豁免下"无 key 也能通"正是豁免的语义（同时也说明这个开关绝不能默认开）
+        r = c.post("/v1/images/generations",
+                   json={"model": "textin:watermark-remove", "image": data_uri(PNG_SMALL),
+                         "dry_run": True})
+    assert checks["api_keys_enabled"] is False and checks["allow_no_auth"] is True
+    assert r.status_code == 200
+
+
+def test_span_buffer_is_bounded(tmp_path):
+    """诊断缓冲**有界**：超上限丢最旧（曾是无限 list ⇒ 长跑按请求线性吃内存）。"""
+    reset_spans()
+    for i in range(250):
+        report("unit.test", i=i)
+    got = spans()
+    assert len(got) == 200                      # 上限
+    assert got[0]["i"] == 50 and got[-1]["i"] == 249   # 丢的是最旧的
+    reset_spans()
 
 
 def test_per_service_quota_does_not_trip_window(tmp_path):

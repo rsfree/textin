@@ -33,8 +33,11 @@ def settings(**overrides: Any) -> Settings:
     `_env_file=None` 只关掉 .env 文件；环境变量仍会生效 ⇒ 显式把关键字段钉死，
     避免本机/CI 的 TEXTIN_* 环境变量把用例带偏（wuli 轮踩过：整个套件 401）。
     """
-    base: dict[str, Any] = {"API_KEYS": "", "TOKEN": "", "ROTATE_XFF": False,
-                            "ALLOW_UNVERIFIED": False, "QUOTA_COOLDOWN": 0.0}
+    # 🔴 测试世界**显式选择"无鉴权"**：`API_KEYS=""` + `ALLOW_NO_AUTH=True`（= app 的 fail-closed
+    #    守卫所要求的那种"明确豁免"）。理由：绝大多数用例测的是接口/翻译层，不是鉴权；
+    #    鉴权自身的用例会**显式**给 `API_KEYS`（那时无 header 必须 401）。
+    base: dict[str, Any] = {"API_KEYS": "", "ALLOW_NO_AUTH": True, "TOKEN": "",
+                            "ROTATE_XFF": False, "ALLOW_UNVERIFIED": False, "QUOTA_COOLDOWN": 0.0}
     base.update(overrides)
     return Settings(_env_file=None, **base)  # type: ignore[call-arg]
 

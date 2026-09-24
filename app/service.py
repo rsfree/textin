@@ -24,8 +24,8 @@ from typing import Any
 from .config import Settings
 from loguru import logger
 
-from .errors import (ApiError, UpstreamDailyQuotaError, UpstreamQuotaError,
-                     UpstreamUnavailableError)
+from .errors import (ApiError, UpstreamDailyQuotaError, UpstreamError,
+                     UpstreamParamError, UpstreamQuotaError, UpstreamUnavailableError)
 from .gate import QuotaWindow
 from .media import image_size, resolve_input, save_media
 from .models import Capability, availability
@@ -188,12 +188,15 @@ async def run(
                 if cooldown:
                     exc.retry_after = cooldown
                 rec["outcome"] = "daily_quota"
+                logger.warning("上游 431（按天额度用尽）⇒ 429 并进入静默窗（service={}）", cap.service)
                 raise
             except UpstreamQuotaError as exc:                       # 451
                 if retries_left <= 0:
                     if attempt > 1:                                 # 重试过还是 451：说清楚
                         exc.message = f"{exc.message}（451 已自动重试 {attempt - 1} 次仍失败）"
                     rec["outcome"] = "quota"
+                    logger.warning("上游 451 软限：重试耗尽仍失败 ⇒ 429（service={}，共 {} 次尝试）",
+                                   cap.service, attempt)
                     raise
                 retries_left -= 1
                 rec["soft_limit_retried"] = attempt
@@ -203,6 +206,14 @@ async def run(
                 )
                 logger.warning("451 软限：换出口重试（service={}，第 {} 次）", cap.service, attempt)
                 continue
+            except UpstreamError as exc:                            # 其余上游失败也要留痕
+                rec["outcome"] = exc.kind
+                (logger.info if isinstance(exc, UpstreamParamError) else logger.warning)(
+                    "上游失败（调用方问题，非本服务缺陷）code={} kind={}（service={}）"
+                    if isinstance(exc, UpstreamParamError) else
+                    "上游失败 code={} kind={}（service={}）",
+                    exc.code, exc.kind, cap.service)
+                raise
         rec["outcome"] = "dry_run" if dry_run else "ok"
         rec["attempts"] = attempt
 

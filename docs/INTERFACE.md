@@ -25,7 +25,10 @@
 `GET /stats`（要 Key）、`GET /capabilities`（要 Key；全集 + 未注册项与原因）。
 
 鉴权：`Authorization: Bearer <key>`，与 `TEXTIN_API_KEYS`（逗号分隔）做白名单比对。
-**为空 = 关闭鉴权**（仅限内网，启动打 WARNING）。`/v1/models` 与 `/files/*` 刻意免鉴权。
+🔴 **为空 ⇒ 拒绝启动**（fail-closed；2026-09-24 事故后收紧——当时空值只打 WARNING，
+服务在公网上无鉴权跑了数小时）。确需无鉴权（受信内网 / 干跑）必须**显式**设
+`TEXTIN_ALLOW_NO_AUTH=1`，此时 `/readyz` 自报 `api_keys_enabled=false` + `allow_no_auth=true`。
+`/v1/models`、`/llms.txt`、`/healthz`、`/readyz`、`/docs`、`/openapi.json`、`/files/*` 刻意免鉴权。
 
 ### 0.1 `models` 端点
 

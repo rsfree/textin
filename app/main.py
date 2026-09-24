@@ -98,7 +98,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.gate = QuotaWindow(s.QUOTA_COOLDOWN)
         Path(s.MEDIA_DIR).mkdir(parents=True, exist_ok=True)
         if not _api_keys(s):
-            logger.warning("TEXTIN_API_KEYS 为空：鉴权已整体关闭，请只在受信内网这样部署")
+            # 🔴 fail-closed：空 keys 默认**拒绝启动**（2026-09-24 事故根因——当时只打 WARNING，
+            #    服务在公网上无鉴权运行了数小时，谁都没看见）。要无鉴权必须显式豁免。
+            if not s.ALLOW_NO_AUTH:
+                logger.error(
+                    "TEXTIN_API_KEYS 为空且未显式豁免 ⇒ 拒绝启动。"
+                    "内网/干跑确实要无鉴权，请显式设 TEXTIN_ALLOW_NO_AUTH=1（届时 /readyz 会自报 false）")
+                raise RuntimeError(
+                    "TEXTIN_API_KEYS 为空：拒绝以无鉴权方式启动（确需请设 TEXTIN_ALLOW_NO_AUTH=1）")
+            logger.warning("TEXTIN_API_KEYS 为空**但已显式豁免**（TEXTIN_ALLOW_NO_AUTH=1）："
+                           "鉴权整体关闭 —— 只允许受信内网这样部署")
         if not s.TOKEN:
             logger.info("未配 TEXTIN_TOKEN：按**匿名**调用上游（配额按 IP 计，见 docs/UPSTREAM.md §4）")
         if s.ROTATE_XFF:
@@ -171,6 +180,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow = bool(s.ALLOW_UNVERIFIED)
         checks = {
             "api_keys_enabled": bool(_api_keys(s)),
+            "allow_no_auth": bool(s.ALLOW_NO_AUTH),     # 无鉴权豁免（fail-closed 的逃生门）
             "upstream_base": f"{s.BASE_URL}{s.OCR_PATH}",
             "upstream_auth": "token" if s.TOKEN else "anonymous",
             "xff_rotation": bool(s.ROTATE_XFF),
