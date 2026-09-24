@@ -30,7 +30,8 @@ from . import __version__
 from .config import Settings, get_settings
 from .errors import UPSTREAM_KIND_STATUS, ApiError, UpstreamError
 from .gate import QuotaWindow
-from .models import CAPABILITIES, NOT_REGISTERED, available, availability, by_family
+from .llms import render as render_llms_txt
+from .models import CAPABILITIES, NOT_REGISTERED, available, availability
 from .observability import setup as setup_observability
 from .observability import spans
 from .service import run, validate_request
@@ -219,82 +220,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def llms_txt(request: Request) -> Response:
         """`/llms.txt`（llmstxt.org 约定）：给 LLM/Agent 的**站点索引**。
 
-        内容由**能力注册表生成**（不手写清单 ⇒ 不会与 `/v1/models` 漂移）；
-        免鉴权（与 `/v1/models` 同属发现面）。链接用**调用方看到的基址** ——
-        回环访问得回环链接、经域名访问得域名链接。
+        渲染在 `app.llms.render`（**纯函数**，便于对账门禁）；这里只负责一件平台相关的事：
+        还原**调用方看到的基址** —— 反代后面用 `X-Forwarded-Proto` 还原对外 scheme
+        （nginx 已设该头），否则 https 站点会写出 http 链接。只在本端点认它：
+        全站开 uvicorn 的 proxy-headers 会顺带改日志/客户端 IP 口径。
         """
         settings: Settings = request.app.state.settings
-        # 反代后面：用 `X-Forwarded-Proto` 还原**对外** scheme（nginx 侧已设该头）——
-        # 否则经 https 域名访问时链接会写成 http://（:80 虽会 301，但索引里给错协议是硬伤）。
-        # 只在本端点做：全站开 uvicorn 的 proxy-headers 会顺带改日志/客户端的 IP 口径，
-        # 而这里只需要「链接的协议」这一件事。
         scheme = (request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
                   or request.url.scheme)
         host = request.headers.get("host") or request.url.netloc
-        base = f"{scheme}://{host}/"
-        allow = settings.ALLOW_UNVERIFIED
-        usable = sorted(available(allow_unverified=allow))
-        lines: list[str] = [
-            "# textin-service",
-            "",
-            "> TextIn（tools.textin.com / api.textin.com）的**同步出口**：把"
-            "「图像处理 / 文档转换 / 识别解析」三族统一成三类动作"
-            "（图进图出 / 文件进文件出 / 文件进结构化），模型名走 OpenAI 兼容发现端点。",
-            "",
-            "## 端点",
-            f"- [模型清单]({base}v1/models)：免鉴权，本部署 {len(usable)} 条（逐字四键，OpenAI 形态）",
-            f"- [健康]({base}healthz)｜[就绪]({base}readyz)：后者含配额静默窗与出口形态（已脱敏）",
-            f"- `POST {base}v1/images/generations`：图像族，`{{\"model\": …, \"image\": \"<data-uri|url|base64>\"}}`",
-            f"- `POST {base}v1/files/convert`：转换族，同族字段用 `file`",
-            f"- `POST {base}v1/files/parse`：解析族，返回结构化 `result`",
-            f"- [能力全集]({base}capabilities)：要鉴权，含未取证项的**原因**",
-            "",
-            "## 能力（按族）",
-            "",
-        ]
-        fam_label = {
-            "image": "图像族 → `POST /v1/images/generations`",
-            "convert": "转换族 → `POST /v1/files/convert`",
-            "parse": "解析族 → `POST /v1/files/parse`",
-        }
-        for fam in ("image", "convert", "parse"):
-            lines.append(f"### {fam_label[fam]}")
-            lines.append("")
-            for name, cap in sorted(by_family(fam).items()):
-                if name not in usable:
-                    continue          # 与 /v1/models 同表：只列**本部署可调用**的
-                out = cap.output + (cap.output_ext or "")
-                accepts = "/".join(cap.accepts)
-                lines.append(f"- `{name}` — {cap.label or cap.service}"
-                             f"（输入 {accepts} → 输出 {out}）")
-            lines.append("")
-        gated = [n for n in sorted(CAPABILITIES) if n not in usable]
-        if gated:
-            lines.append(f"- 🔒 另有 {len(gated)} 条能力因**未取证**被门禁挡住（"
-                         + "、".join(f"`{n}`" for n in gated)
-                         + "）：原因与开启方式见 `GET /capabilities`。")
-            lines.append("")
-        lines += [
-            "## 鉴权",
-            "",
-            "`Authorization: Bearer <key>`。免鉴权：`/v1/models`、`/healthz`、`/readyz`、"
-            "`/llms.txt`、`/files/*`。",
-            "",
-            "## 形态与限制",
-            "",
-            "- **同步**接口（没有任务 id）：一次请求一次返回；输入上限 50MB（data-uri / 外链 / 附件）。",
-            "- 上游是**匿名试用额度**，按「出口 IP × service × 天」计：去水印约 25~30 次成功/天/IP。",
-            "  `431`＝当日额度用尽（**当天不恢复**）；`451`＝该 service 的软限（约每 4 发 1 次；换出口有效）。",
-            "- 典型延迟 1~3s（文档转换族更长）；`dry_run: true` 可**零成本**预演将发往上游的请求。",
-            f"- 服务版本 {__version__}；未取证能力默认 `503 capability_not_verified`。",
-            "",
-            "## 源码与契约",
-            "",
-            "- [仓库](https://github.com/rsfree/textin)",
-            "- [接口契约 INTERFACE.md](https://github.com/rsfree/textin/blob/main/docs/INTERFACE.md)",
-            "",
-        ]
-        return Response("\n".join(lines), media_type="text/markdown; charset=utf-8")
+        body = render_llms_txt(f"{scheme}://{host}/",
+                               allow_unverified=settings.ALLOW_UNVERIFIED)
+        return Response(body, media_type="text/markdown; charset=utf-8")
 
     @app.get("/capabilities")
     async def capabilities(request: Request,

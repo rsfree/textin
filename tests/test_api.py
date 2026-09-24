@@ -395,32 +395,18 @@ def test_response_format_url_mirrors_and_serves(tmp_path):
     assert (media / url.rsplit("/", 1)[1]).read_bytes() == JPEG_SMALL
 
 
-def test_llms_txt_is_public_and_mirrors_the_model_list(tmp_path):
-    """`/llms.txt`（llmstxt.org 约定）：免鉴权 + Markdown + **与 /v1/models 同表**。
+def test_llms_txt_route_wiring(tmp_path):
+    """HTTP 层只钉「接线」：200 + `text/markdown` + **免鉴权**（不带任何头也能拿）。
 
-    硬断言：三族小节齐；每个可调用模型**逐条列出**（用注册表的 `label`，不是排障用的 notes）；
-    门禁项不作为条目出现，但要在**一行门禁说明**里点名（否则读者不知道它存在）；
-    链接基址随调用方（TestClient 的基址是 http://testserver/）。
+    内容层面的对账（条目↔注册表、端点↔真实路由）在 `tests/test_llms.py` —— 那边只调纯函数，
+    快且不必起 HTTP；这里刻意不重复。
     """
     app, _ = _app(tmp_path)
     with TestClient(app) as c:
-        r = c.get("/llms.txt")                       # 不带任何鉴权头
-        usable = [m["id"] for m in c.get("/v1/models").json()["data"]]
+        r = c.get("/llms.txt", headers={"accept": "text/markdown"})
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/markdown")
-    body = r.text
-    assert body.startswith("# textin-service")
-    assert body.splitlines()[2].startswith("> ")      # 摘要 blockquote（llms.txt 约定）
-    for fam in ("图像族", "转换族", "解析族"):
-        assert fam in body, fam
-    missing = [mid for mid in usable if f"- `{mid}` — " not in body]
-    assert not missing, f"llms.txt 漏列：{missing}"
-    model_bullets = [ln for ln in body.splitlines() if ln.startswith("- `textin:")]
-    assert len(model_bullets) == len(usable) == 20
-    assert "- `textin:ofd-to-image` — " not in body, "门禁项不应作为可调用条目出现"
-    assert "🔒" in body and "`textin:ofd-to-image`" in body, "门禁项要在一行说明里被点名"
-    assert "http://testserver/v1/models" in body, "链接必须用调用方看到的基址"
-    assert "Bearer" in body and "431" in body and "451" in body
+    assert r.text.startswith("# textin-service")
 
 
 def test_llms_txt_honours_forwarded_proto(tmp_path):

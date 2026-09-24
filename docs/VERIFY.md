@@ -134,6 +134,11 @@ $V/python scripts/probe.py --phases "" --live --cap textin:watermark-remove
   取证：修复前 `effective/顶层 model` 都是 `textin:table`；修复后为 `textin:table-excel`。
 - 同时补两条注册表门禁（此前**没有**，正是因为缺失才放过上面那个 bug）：
   `cap.name == key`、`cap.label` 非空；**变异自证**：清空任一 label ⇒ 门禁红（rc=1），还原 ⇒ 绿。
+- **2026-09-24 下午 · 模块化 + 对账门禁**：渲染从 `main.py` 抽成 `app/llms.py`（纯函数）；
+  新增 `tests/test_llms.py` 6 条门禁（注册表双向对账含 `label` 逐字；端点↔真实路由双向对账，
+  豁免带理由）。**变异自证**：幽灵路径 / 未登记路由 / label 漂移 三种变异都能让门禁红；
+  过程中修掉一个真漏洞 —— 原提取逻辑把绝对 URL 直接丢掉，导致"幽灵路径"检不出来。
+  CI 冒烟也补了 3 条 `/llms.txt` 断言。用例 95 → **100**。
 - 与之配套：注册表新增 `label` 字段（21 条全部填好），`/llms.txt` 用 `label` 而不是截 `notes`
   —— `notes` 是排障文本、常以半句话开头（「输出会被裁边」「全表唯一例外」），截出来不可读。
 
