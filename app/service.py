@@ -26,6 +26,7 @@ from loguru import logger
 
 from .errors import (ApiError, UpstreamDailyQuotaError, UpstreamError,
                      UpstreamParamError, UpstreamQuotaError, UpstreamUnavailableError)
+from .fallback import FallbackUnavailable, collect_dewatermark, fallback_available
 from .gate import QuotaWindow
 from .media import image_size, resolve_input, save_media
 from .models import Capability, availability
@@ -110,6 +111,25 @@ def validate_request(payload: Any, *, family: str) -> tuple[Capability, str, boo
     return cap, response_format, dry, unsupported
 
 
+async def _fallback_envelope(
+    *,
+    cap: Capability,
+    blob: Any,
+    settings: Settings,
+    warnings: list[str],
+    rec: dict[str, Any],
+) -> dict[str, Any]:
+    """431 降级：经体验页采集器出图，合成与上游同形的 envelope（装配层无感知）。
+
+    失败抛 `FallbackUnavailable`，调用方据此回退到 431 原语义（429 + 静默窗）。
+    """
+    b64 = await collect_dewatermark(blob.data, blob.mime, settings)
+    warnings.append("上游按天额度已满（431）⇒ 经体验页免费通道出图（fallback）")
+    rec["outcome"] = "fallback_ok"
+    rec["fallback"] = True
+    return {"code": 200, "data": {"result": {"image": b64}}}
+
+
 async def run(
     *,
     settings: Settings,
@@ -130,7 +150,7 @@ async def run(
         raise ApiError(503, "capability_not_verified", reason, model=cap.name)
 
     # ---- 2) 431 静默窗（当天不恢复 ⇒ 白打没有意义；dry_run 不触网，天然豁免）----
-    if not dry_run and gate.open():
+    if not dry_run and gate.open() and not fallback_available(cap.service, settings):
         snap = gate.snapshot()
         raise ApiError(
             429, "daily_quota_cooldown",
@@ -181,6 +201,11 @@ async def run(
         while True:
             attempt += 1
             try:
+                # 431 静默窗内：若配了降级通道，跳过上游直接走它（不再空打已满的额度）
+                if not dry_run and gate.open() and fallback_available(cap.service, settings):
+                    envelope = await _fallback_envelope(
+                        cap=cap, blob=blob, settings=settings, warnings=warnings, rec=rec)
+                    break
                 envelope = await client.call(cap, blob.data, blob.mime, dry_run=dry_run)
                 break
             except UpstreamDailyQuotaError as exc:
@@ -188,6 +213,14 @@ async def run(
                 if cooldown:
                     exc.retry_after = cooldown
                 rec["outcome"] = "daily_quota"
+                if not dry_run and fallback_available(cap.service, settings):
+                    try:
+                        envelope = await _fallback_envelope(
+                            cap=cap, blob=blob, settings=settings, warnings=warnings, rec=rec)
+                        logger.info("431 降级成功：体验页免费通道出图（service={}）", cap.service)
+                        break
+                    except FallbackUnavailable as fb:
+                        logger.warning("431 降级不可用：{}；回退 429（service={}）", fb, cap.service)
                 logger.warning("上游 431（按天额度用尽）⇒ 429 并进入静默窗（service={}）", cap.service)
                 raise
             except UpstreamQuotaError as exc:                       # 451
@@ -207,6 +240,18 @@ async def run(
                 logger.warning("451 软限：换出口重试（service={}，第 {} 次）", cap.service, attempt)
                 continue
             except UpstreamError as exc:                            # 其余上游失败也要留痕
+                # 441（reach_limit，窗口/出口额度）与 431 同源：都表示「该出口的试用额度
+                # 此刻不可用」⇒ 一并尝试降级（体验页通道是独立计量，实测常能用）
+                if not dry_run and getattr(exc, "code", None) == 441 \
+                        and fallback_available(cap.service, settings):
+                    try:
+                        envelope = await _fallback_envelope(
+                            cap=cap, blob=blob, settings=settings, warnings=warnings, rec=rec)
+                        logger.info("441 降级成功：体验页免费通道出图（service={}）", cap.service)
+                        break
+                    except FallbackUnavailable as fb:
+                        logger.warning("441 降级不可用：{}；保留上游错误（service={}）",
+                                       fb, cap.service)
                 rec["outcome"] = exc.kind
                 (logger.info if isinstance(exc, UpstreamParamError) else logger.warning)(
                     "上游失败（调用方问题，非本服务缺陷）code={} kind={}（service={}）"

@@ -157,6 +157,7 @@ tests/                 86 项，全离线（socket 级门禁）
 |---|---|
 | `scripts/dewm_headless.py` | Playwright headless + 页面内 fetch 调体验页去水印；441/431 自动换 IP 重试、断点续跑、`results.jsonl` 全量记账 |
 | `scripts/dewm_dashboard.py` | 实时看板（吞吐 / 响应码 / 账号-IP 命中率 / 最近记录，3s 刷新，零外部依赖） |
+| `scripts/dewm_server.py` | 上面的采集器封装成 **sidecar HTTP 服务**（`POST /v1/dewm`），供主服务 431/441 时降级调用 |
 | `scripts/start_gost.sh` | 代理池账号 → 本地 HTTP 转发（Chromium 不支持 socks5 认证，gost 桥接） |
 
 **为什么必须浏览器**：原生 HTTP 客户端（curl/curl_cffi/urllib）会被 WAF 客户端指纹层直接 441；
@@ -188,3 +189,29 @@ python3 scripts/dewm_dashboard.py --data-dir ./out --port 8765
 ```
 
 代理池为共享池，命中率取决于池内 IP 新鲜度；跑前建议先小批量探测（如 `--acct-end 20`）。
+
+### 与主链路的自动降级（可选，默认关）
+
+主链路（httpx → api.textin.com）收到 **431（按天额度打满）** 或 **441（reach_limit，
+该出口此刻不可用）** 时，若配置了 `TEXTIN_FALLBACK_URL` 且能力是 `watermark-remove`，
+自动转交采集器出图；输出契约与常规路径**完全同形**（`data[0].b64_json` + `usage` +
+`warnings` 留痕）。采集器不可用 ⇒ 回退到上游原错误，不掩盖真因。
+
+```bash
+# 采集器 sidecar（节点上常驻）
+python3 scripts/dewm_server.py --port 8790            # 直连
+python3 scripts/dewm_server.py --port 8790 \         # 账号池（每请求独占出口）
+  --pool-host pool.livetest.cn:2090 --pool-pass "$TEXTIN_POOL_PASS" \
+  --acct-prefix t --acct-start 1 --acct-end 600
+
+# 主服务侧
+TEXTIN_FALLBACK_URL=http://127.0.0.1:8790
+TEXTIN_FALLBACK_TIMEOUT=180
+```
+
+行为要点（均有单测钉住，见 `tests/test_fallback.py`）：
+
+- **默认关**：`FALLBACK_URL` 空 ⇒ 431/441 行为与历史版本完全一致（429/502 + 静默窗）
+- **只认去水印**：其它能力降级无意义，照旧报上游错误
+- **静默窗内不打上游**：431 静默窗开着时，去水印请求直接走采集器（不再空打已满的额度）
+- **失败不掩盖真因**：采集器挂了 ⇒ 回退 431 原语义（429 + 静默窗）/ 441 原错误

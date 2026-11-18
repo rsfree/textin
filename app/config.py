@@ -63,6 +63,14 @@ class Settings(BaseSettings):
     # 未取证能力闸门：text_auto_removal / ofd-to-image 默认不可用（见 app/models.py）。
     ALLOW_UNVERIFIED: bool = False
 
+    # ---- 431 降级：体验页免费通道采集器（sidecar）----
+    # 主链路 431（按天额度打满）时的补充通道：本机 sidecar（scripts/dewm_server.py）
+    # 用 headless 浏览器走体验页免费额度出图，输出契约与本服务完全一致。
+    # **空 = 关**：431 行为与原来完全一致（429 + 静默窗）。
+    # 只对 watermark-remove 生效（采集器的能力面就是去水印）。
+    FALLBACK_URL: str = ""
+    FALLBACK_TIMEOUT: float = 180.0
+
     # ---- 可观测性（可选，可静默降级）----
     LOGFIRE_TOKEN: str = ""
     OTEL_SERVICE_NAME: str = "textin-service"
