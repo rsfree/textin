@@ -36,6 +36,7 @@ import base64
 import json
 import os
 import queue
+import socket
 import subprocess
 import sys
 import threading
@@ -148,7 +149,7 @@ class Session:
     def close(self) -> None:
         try:
             self.ctx.close()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110 - 关闭失败不阻塞主流程
             pass
 
 
@@ -194,7 +195,7 @@ class GostSlot:
             except Exception:  # noqa: BLE001
                 try:
                     self.proc.kill()
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001, S110 - 兜底关闭
                     pass
             self.proc = None
         # 清理可能残留的同端口进程
@@ -203,25 +204,21 @@ class GostSlot:
 
     def bind(self, acct: str) -> bool:
         """把本 slot 的上游切到指定账号（= 指定出口 IP）。"""
-        import subprocess as sp
-
         self._kill()
         up = f"socks5://poolclient-{acct}:{self.password}@{self.pool_host}"
         try:
-            self.proc = sp.Popen(
+            self.proc = subprocess.Popen(
                 ["gost", "-L", f"http://127.0.0.1:{self.port}", "-F", up],
-                stdout=sp.DEVNULL, stderr=sp.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
         except FileNotFoundError:
             log("gost 未安装：请先 apt/下载 gost v3")
             return False
         self.acct = acct
         # 等端口就绪
-        import socket as _s
-
         for _ in range(30):
             try:
-                with _s.create_connection(("127.0.0.1", self.port), timeout=0.3):
+                with socket.create_connection(("127.0.0.1", self.port), timeout=0.3):
                     return True
             except OSError:
                 time.sleep(0.1)
@@ -243,7 +240,7 @@ def worker(
     allocator: "AccountAllocator | None" = None,
     slot: "GostSlot | None" = None,
 ) -> None:
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import sync_playwright  # noqa: PLC0415 - 延迟导入：无需 playwright 也能 import 本模块
 
     pw = sync_playwright().start()
     browser = pw.chromium.launch(
@@ -351,7 +348,7 @@ def worker(
             slot.close()
         try:
             browser.close()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110 - 关闭失败不阻塞主流程
             pass
 
 

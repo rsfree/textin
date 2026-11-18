@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
-import threading
 import time
 from collections import Counter, defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
