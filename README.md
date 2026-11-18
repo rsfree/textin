@@ -147,3 +147,44 @@ tests/                 86 项，全离线（socket 级门禁）
 - `var/media` 要可写（`response_format=url` 用）；容器里已建好并 chown 给运行用户。
 - 健康检查：`/healthz`（零依赖）；`/readyz` 会报配额静默窗状态与**脱敏后的出口池**
   （窗内 `degraded`）。
+
+## 5. 免费通道采集器（`scripts/dewm_*`）
+
+当 API 通道进入 431 静默窗（`app/gate.py`）后仍要出图时，**体验页的免费额度**是最后的补充通道。
+这组脚本独立于 `app/` 主链路，不进线上服务，只在本机/节点上按需跑：
+
+| 文件 | 作用 |
+|---|---|
+| `scripts/dewm_headless.py` | Playwright headless + 页面内 fetch 调体验页去水印；441/431 自动换 IP 重试、断点续跑、`results.jsonl` 全量记账 |
+| `scripts/dewm_dashboard.py` | 实时看板（吞吐 / 响应码 / 账号-IP 命中率 / 最近记录，3s 刷新，零外部依赖） |
+| `scripts/start_gost.sh` | 代理池账号 → 本地 HTTP 转发（Chromium 不支持 socks5 认证，gost 桥接） |
+
+**为什么必须浏览器**：原生 HTTP 客户端（curl/curl_cffi/urllib）会被 WAF 客户端指纹层直接 441；
+headless Chromium 可通过（实测），页面内 fetch 与线上前端完全同构。
+
+**频控实测**（2026-11-18，决定调度策略）：
+
+| 层级 | 判据 | 码 | 说明 |
+|---|---|---|---|
+| 客户端指纹 | 非浏览器 | 441 | 快拒，不耗额度 |
+| 出口 IP 额度 | 单 IP 累计 | 441 / **431** | 机房 IP ~3 次/天；住宅真 Chrome ~13 次/天 |
+| 每日重置 | 自然日 | — | 431 需等次日 |
+
+**用法**：
+
+```bash
+# 直连（单 IP，少量）
+python3 scripts/dewm_headless.py --input a.jpg --out ./out --check-ip
+
+# 代理池 + IP 独占（推荐；一个出口 IP 同时只有一个并发）
+export TEXTIN_POOL_PASS='***'
+bash scripts/start_gost.sh 20
+python3 scripts/dewm_headless.py --input-dir ./imgs --out ./out --workers 4 \
+  --pool-host pool.livetest.cn:2090 --pool-pass "$TEXTIN_POOL_PASS" \
+  --acct-prefix t --acct-start 1 --acct-end 600
+
+# 看板（绑 127.0.0.1，SSH 隧道访问）
+python3 scripts/dewm_dashboard.py --data-dir ./out --port 8765
+```
+
+代理池为共享池，命中率取决于池内 IP 新鲜度；跑前建议先小批量探测（如 `--acct-end 20`）。
